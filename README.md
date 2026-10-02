@@ -53,3 +53,14 @@ claude plugin update tracking@batapha-mods
 | `/tracking-clear` | 清掉所有进度条 |
 
 设置项在 `/plugin` → tracking → 配置 里修改。
+
+### 用文字控制
+
+插件注册了一个工具 `mcp__tracking__control`，在对话里直接说就行，例如：
+
+- “隐藏用量条” / “显示用量条”
+- “清掉进度条”、“打开 Tracking 详情”
+- “关掉多步任务先建进度条”、“关掉提示音”、“不显示 5h 和周限额”
+- “Tracking 现在什么设置？”
+
+设置的改动和在 `/plugin` → tracking → 配置 里改是一样的，会保存下来，插件随即重新加载。

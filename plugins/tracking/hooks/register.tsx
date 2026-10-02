@@ -9,6 +9,8 @@ import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFi
 import type { Raw, Where } from './bars'
 import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, glyphOf, usageCells, renderTitle, measure, cellWidth, gridColumns } from './figures'
 import type { Cell } from './figures'
+import { CONTROL, CONTROL_SPEC, readControl, settingRowKey, statusText, settingLine } from './control'
+import type { SettingKey } from './control'
 import { DEFAULTS, EMPTY_USAGE, readOptions, THEME } from './state'
 import type { Options, Sound } from './state'
 
@@ -119,6 +121,7 @@ async function usageSessionStart($: EngineInterface) {
   void refreshCompactAt($)
   await $.command.register({ name: 'tracking', description: '显示或隐藏 Tracking 用量条' })
   await $.command.register({ name: 'tracking-detail', description: '打开 Tracking 详情：各模型、各子代理的 token 和金额' })
+  await $.tool.register(CONTROL_SPEC)
   // a second hand while the cache counts down; otherwise every 30 s for the quota reset times
   $.clock.every(1000, async () => {
     const u = await read($, usage)
@@ -195,6 +198,38 @@ function registerUsage(on: On, options: Options) {
     const hidden = await read($, isHidden)
     await update($, isHidden, () => !hidden)
     return { text: hidden ? 'Tracking 已显示。' : 'Tracking 已隐藏，再次输入 /tracking 可显示。' }
+  })
+
+  // the same switches as the commands and /plugin → tracking → 配置, for a conversation to call
+  on('tool.call', { tool: CONTROL }, async ($, e) => {
+    const ask = readControl(e)
+    const done: string[] = []
+    if (ask.visible !== undefined) {
+      await update($, isHidden, () => !ask.visible)
+      done.push(ask.visible ? '用量条已显示' : '用量条已隐藏')
+    }
+    if (ask.clearBars) {
+      await update($, plans, () => [])
+      done.push('进度条已清除')
+    }
+    if (ask.openDetail) {
+      const opened = await $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })
+      done.push(opened.isPlaced ? '详情已打开' : '终端太窄，详情面板暂时放不下')
+    }
+    const fields = Object.keys(ask.settings) as SettingKey[]
+    const shown: Options = { ...opts, ...ask.settings }
+    if (fields.length) {
+      const rows = await $.config.list()
+      for (const field of fields) {
+        const value = ask.settings[field] as string | boolean
+        const { deny } = await $.config.set({ key: settingRowKey(rows, field), value })
+        if (deny) shown[field] = opts[field] as never
+        done.push(settingLine(field, value, deny))
+      }
+    }
+    const state = statusText(shown, await read($, isHidden), (await read($, plans)).length)
+
+    return { result: done.length ? `${done.join('；')}\n\n${state}` : state }
   })
 
   on('command.run', { command: 'tracking-detail' }, async $ => {
