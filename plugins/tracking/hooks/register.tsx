@@ -210,7 +210,7 @@ function registerUsage(on: On, options: Options) {
 
 }
 
-async function drawUsage($: EngineInterface, e: { surface: string }, opts: Options, elements: ReturnType<EngineInterface['ui']['resolve']>) {
+async function drawUsage($: EngineInterface, e: { surface: string; props: { bodyColumns: number } }, opts: Options, elements: ReturnType<EngineInterface['ui']['resolve']>) {
   if (await read($, isHidden)) return null
   await read($, tick)
   const u = await read($, usage)
@@ -245,7 +245,7 @@ async function drawUsage($: EngineInterface, e: { surface: string }, opts: Optio
         <Text color={dotColor}>{`● ${dotLabel}`}</Text>
         {top.map(c => cell(c, false))}
       </Box>
-      {hairline(elements, 'line-usage')}
+      {hairline(elements, e.surface, e.props.bodyColumns, 'line-usage')}
       <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={isTerminal ? 3 : 4} flexWrap="wrap" width="100%">
         {spend.map(c => cell(c, c.key.startsWith('m-')))}
         <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
@@ -691,12 +691,24 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   )
 }
 
-// a thin dim rule across the band; text, so it draws the same on every surface and truncates to the width
-function hairline(t: ReturnType<EngineInterface['ui']['resolve']>, key: string) {
-  const { Text } = t
+// a thin dim rule across the band, exactly as wide as it: no "…" from a line cut short.
+// Desktop: an Svg wider than any band, which the surface caps at the slot's width (its markup width, up to the slot).
+// Terminal: one "─" per cell of the band.
+const RULE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="1" viewBox="0 0 4000 1" preserveAspectRatio="none"><rect width="4000" height="1" fill="#808080" fill-opacity=".35"/></svg>`
+
+function hairline(t: ReturnType<EngineInterface['ui']['resolve']>, surface: string, columns: number, key: string) {
+  const { Box, Text } = t
+  if (surface !== 'terminal' && 'Svg' in t) {
+    const { Svg } = t
+    return (
+      <Box key={key} width="100%" marginY={0}>
+        <Svg source={RULE_SVG} alt="" height={1} />
+      </Box>
+    )
+  }
   return (
     <Text key={key} dimColor wrap="truncate">
-      {'─'.repeat(400)}
+      {'─'.repeat(Math.max(1, columns || 80))}
     </Text>
   )
 }
@@ -726,7 +738,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" width="100%">
         {top}
-        {top && bars ? hairline(t, 'line-progress') : null}
+        {top && bars ? hairline(t, e.surface, e.props.bodyColumns, 'line-progress') : null}
         {bars}
       </Box>
     )

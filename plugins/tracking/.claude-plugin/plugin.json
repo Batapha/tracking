@@ -1,6 +1,6 @@
 {
   "name": "tracking",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "提示框上方三行：用量（ctx、5h、周限额）/ 缓存倒计时、本会话金额、各模型 token / 当前任务的步骤进度条；提示音、会话自动命名",
   "author": {
     "name": "Batapha"

@@ -60,11 +60,19 @@ for (const surface of SURFACES) {
     expect(band).toBeDefined()
     const kids = (band?.children ?? []) as { type: string; props: Record<string, unknown> }[]
     // usage row, a hairline, spend row; both rows run edge to edge
-    expect(kids.map(k => k.type)).toEqual(['Box', 'Text', 'Box'])
+    expect(kids.map(k => k.type)).toEqual(['Box', surface === 'terminal' ? 'Text' : 'Box', 'Box'])
     expect(kids[0]?.props.justifyContent).toBe('space-between')
     expect(kids[2]?.props.justifyContent).toBe('space-between')
-    // and a second hairline above the progress row
-    expect(await ui.findAll({ type: 'Text', text: /^─+$/ })).toHaveLength(2)
+    // and a second hairline above the progress row, each exactly the band's width: never cut short with "…"
+    if (surface === 'terminal') {
+      const rules = await ui.findAll({ type: 'Text', text: /^─+$/ })
+      expect(rules.map(r => r.text.length)).toEqual([120, 120])
+    } else {
+      const rules = (await ui.findAll({ type: 'Svg' })).filter(r => r.props.alt === '')
+      expect(rules).toHaveLength(2)
+      expect(rules[0]?.props.width).toBeUndefined()
+      expect(String(rules[0]?.props.source)).toContain('preserveAspectRatio="none"')
+    }
 
     const text = band?.text ?? ''
     expect(text).toContain('51%') // ctx
