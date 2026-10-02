@@ -1,0 +1,65 @@
+{
+  "name": "tracking",
+  "version": "0.1.0",
+  "description": "提示框上方两行用量条（ctx、5h、周限额、缓存倒计时 / 本会话金额、各模型 token），实时进度条，阶段提示音，会话自动命名",
+  "author": {
+    "name": "LBH"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtl": {
+      "type": "string",
+      "title": "提示缓存有效期",
+      "description": "auto 从会话记录里自动识别；也可固定为 5m 或 1h",
+      "default": "auto",
+      "options": [
+        "auto",
+        "5m",
+        "1h"
+      ]
+    },
+    "showRateLimits": {
+      "type": "boolean",
+      "title": "显示 5h / 周限额",
+      "description": "如果桌面版自带的用量表已经显示，可以关掉",
+      "default": true
+    },
+    "quotaAlerts": {
+      "type": "boolean",
+      "title": "限额提醒",
+      "description": "5h 或周限额超过 80%、95% 时弹提示并响铃",
+      "default": true
+    },
+    "sounds": {
+      "type": "boolean",
+      "title": "提示音",
+      "description": "阶段完成、需要你决定、出错、任务完成时播放声音",
+      "default": true
+    },
+    "speakStages": {
+      "type": "boolean",
+      "title": "朗读阶段",
+      "description": "用 macOS 的 say 念出刚完成的阶段",
+      "default": false
+    },
+    "renameSession": {
+      "type": "boolean",
+      "title": "自动命名会话",
+      "description": "按下面的模板设置会话标题",
+      "default": true
+    },
+    "titleTemplate": {
+      "type": "string",
+      "title": "会话标题模板",
+      "description": "{project} 是文件夹名，{task} 是当前进度条标题，{stage} 是当前阶段",
+      "default": "{project} · {task}"
+    },
+    "planGate": {
+      "type": "boolean",
+      "title": "多步任务先建进度条",
+      "description": "没有进度条时，第 4 次改动类工具调用会被拦一次，让 Claude 先建进度条",
+      "default": true
+    }
+  }
+}

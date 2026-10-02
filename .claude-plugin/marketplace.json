@@ -1,0 +1,16 @@
+{
+  "name": "lbh-mods",
+  "owner": {
+    "name": "LBH"
+  },
+  "metadata": {
+    "description": "LBH 的 Claude Code 插件"
+  },
+  "plugins": [
+    {
+      "name": "tracking",
+      "source": "./plugins/tracking",
+      "description": "用量条、进度条、阶段提示音和会话命名"
+    }
+  ]
+}
