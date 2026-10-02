@@ -285,7 +285,7 @@ const COLUMN: ColumnLayout = { width: '25%', group: '100%', icon: '15%', value: 
 
 // one cell, the same in every column and row: the icon, the value centred in a slot as wide as the column's widest value,
 // the label centred in a slot as wide as its widest label. The three together are one group, centred in the column;
-// `wide` spans the value and label slots (a task title, the step bars, a cell with no value)
+// `wide` spans the value and label slots (the step bars, a cell with no value)
 function slot(t: Elements, surface: string, key: string, col: ColumnLayout, icon: JSX.Element | null, value: string, label: JSX.Element | null, level: Level, wide?: JSX.Element) {
   const { Box, Text } = t
   const valueText = level === 'warn' || level === 'bad' ? <Text color={THEME[level]}>{value}</Text> : level === 'off' ? <Text dimColor>{value}</Text> : <Text>{value}</Text>
@@ -309,6 +309,23 @@ function slot(t: Elements, surface: string, key: string, col: ColumnLayout, icon
           {label}
         </Box>
       )}
+    </Box>
+  )
+}
+
+// the task cell (row 3, column 1): its mark centred over the icon and value slots together, so it sits under the
+// "icon · value" of the cells above; the title centred in the label slot, so it sits under their labels
+function taskSlot(t: Elements, key: string, col: ColumnLayout, mark: JSX.Element, title: JSX.Element) {
+  const { Box } = t
+  const span = `${Math.min(100, parseInt(col.icon) + parseInt(col.value))}%`
+  return (
+    <Box key={key} width={col.group} flexDirection="row" alignItems="center">
+      <Box key="mark" width={span} flexShrink={0} flexDirection="row" justifyContent="center" alignItems="center">
+        {mark}
+      </Box>
+      <Box key="label" flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center" overflow="hidden">
+        {title}
+      </Box>
     </Box>
   )
 }
@@ -724,7 +741,7 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
 
   if (!p) {
     return gridRow(t, 'bar-none', layout, [
-      slot(t, surface, 'title', col(0), <Text dimColor>○</Text>, '', null, 'off', <Text dimColor wrap="truncate">暂无进行中的任务</Text>),
+      taskSlot(t, 'title', col(0), <Text dimColor>○</Text>, <Text dimColor wrap="truncate">暂无进行中的任务</Text>),
       slot(t, surface, 'steps', col(1), null, '', null, 'off', <Text dimColor>—</Text>),
       slot(t, surface, 'count', col(2), iconOf(t, surface, 'steps', 0, 'off', '步骤'), '0/0', steps, 'off'),
       slot(t, surface, 'pct', col(3), iconOf(t, surface, 'ring', 0, 'off', '进度'), '0%', progress, 'off'),
@@ -760,7 +777,7 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   return (
     <Box key={`bar-${p.id}`} flexDirection="column" width="100%">
       {gridRow(t, `row-${p.id}`, layout, [
-        slot(t, surface, 'title', col(0), <Text color={color}>{STATE_GLYPH[p.state]}</Text>, '', null, 'ok', <Text wrap="truncate">{p.title}</Text>),
+        taskSlot(t, 'title', col(0), <Text color={color}>{STATE_GLYPH[p.state]}</Text>, <Text wrap="truncate">{p.title}</Text>),
         slot(t, surface, 'steps', col(1), null, '', null, 'ok', bars),
         slot(t, surface, 'count', col(2), iconOf(t, surface, 'steps', 0, 'off', '步骤'), segmentsCount(p), steps, 'ok'),
         slot(t, surface, 'pct', col(3), iconOf(t, surface, 'ring', pct / 100, pctLevel, '进度'), `${pct}%`, progress, 'ok'),
@@ -831,7 +848,7 @@ async function bandColumns($: EngineInterface, surface: string, bodyColumns: num
   const steps = !p ? 1 : isTerminal ? segments(p).reduce((k, st, i) => k + st.length + (i > 0 ? 1 : 0), 0) : Math.ceil(segmentsSvg(p, stepsMaxWidth(bodyColumns)).width / 8)
   const pick = (i: number) => [top[i], spend[i]].filter((c): c is Cell => c !== undefined)
   const content = [
-    columnContent(pick(0).map(c => c.value), pick(0).map(c => c.label), [cells(p ? p.title : '暂无进行中的任务')]),
+    columnContent(pick(0).map(c => c.value), [...pick(0).map(c => c.label), p ? p.title : '暂无进行中的任务']),
     columnContent(pick(1).map(c => c.value), pick(1).map(c => c.label), [steps]),
     columnContent([...pick(2).map(c => c.value), p ? segmentsCount(p) : '0/0'], [...pick(2).map(c => c.label), '步骤']),
     columnContent(['100%'], ['进度'], [cells(status), cells('详情 ›')]),
