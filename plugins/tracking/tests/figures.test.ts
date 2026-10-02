@@ -52,12 +52,15 @@ test('usage cells: ctx and quota windows on one row; cache first, then cost and 
   expect(usage.map(c => c.key)).toEqual(['ctx', 'rl-five_hour', 'rl-seven_day'])
   expect(usage[1]?.level).toBe('warn')
   expect(usage[1]?.label).toContain('5h')
-  expect(spend.map(c => c.key)).toEqual(['cache', 'cost', 'm-claude-opus-5-5', 'm-claude-haiku-4-5'])
+  expect(spend.map(c => c.key)).toEqual(['cache', 'cost', 'm-claude-opus-5-5'])
+  expect(spend[2]?.label).toContain('+1 个模型')
   expect(spend[0]?.value).toBe('4:00')
     expect(spend.map(c => c.label).join(' ')).toContain('Opus 5.5')
 
   const hidden = usageCells(u, { ...DEFAULTS, showRateLimits: false }, now)
-  expect(hidden.usage.map(c => c.key)).toEqual(['ctx'])
+  // the columns stay, with nothing in them
+  expect(hidden.usage.map(c => c.key)).toEqual(['ctx', 'rl-five_hour', 'rl-seven_day'])
+  expect(hidden.usage[1]?.value).toBe('—')
 
   const expired = usageCells(u, DEFAULTS, now + 10 * 60_000)
   expect(expired.spend[0]?.value).toBe('已失效')

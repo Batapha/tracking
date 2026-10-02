@@ -239,17 +239,13 @@ async function drawUsage($: EngineInterface, e: { surface: string; props: { body
   const dotColor = busy === 'waiting' ? THEME.warn : busy === 'running' ? THEME.ok : THEME.off
   const dotLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
 
+  const detail = <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
+
   return (
     <Box key="tracking-usage" flexDirection="column" width="100%">
-      <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={isTerminal ? 3 : 4} flexWrap="wrap" width="100%">
-        <Text color={dotColor}>{`● ${dotLabel}`}</Text>
-        {top.map(c => cell(c, false))}
-      </Box>
+      {gridRow(elements, 'row-usage', [...top.map(c => cell(c, false)), <Text key="status" color={dotColor}>{`● ${dotLabel}`}</Text>])}
       {hairline(elements, e.surface, e.props.bodyColumns, 'line-usage')}
-      <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={isTerminal ? 3 : 4} flexWrap="wrap" width="100%">
-        {spend.map(c => cell(c, c.key.startsWith('m-')))}
-        <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
-      </Box>
+      {gridRow(elements, 'row-spend', [...spend.map(c => cell(c, c.key.startsWith('m-'))), detail])}
     </Box>
   )
 }
@@ -635,17 +631,13 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   const p = shownBar(await read($, plans))
   const { Box, Text } = t
   const Svg = surface !== 'terminal' && 'Svg' in t ? t.Svg : null
-  // desktop reports ~8 CSS px per column; the steps take at most half the band
-  const maxW = Math.max(160, Math.round((bodyColumns || 100) * 8 * 0.5))
+  // desktop reports ~8 CSS px per column; the steps fit their quarter of the band
+  const maxW = Math.max(80, Math.round((bodyColumns || 100) * 8 * 0.25) - 16)
   await read($, progressTick)
   const now = await $.clock.now()
 
   if (!p) {
-    return (
-      <Box key="bar-none" flexDirection="row" alignItems="center" width="100%">
-        <Text dimColor>○ 暂无进行中的任务</Text>
-      </Box>
-    )
+    return gridRow(t, 'bar-none', [<Text key="title" dimColor>○ 暂无进行中的任务</Text>, <Text key="steps" dimColor>—</Text>, <Text key="count" dimColor>0/0</Text>, <Text key="pct" dimColor>0%</Text>])
   }
 
   const v = visibleAgents(p, now)
@@ -657,52 +649,68 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   const alt = `${p.title}: ${label}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
   const stripsH = v ? stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
   const stripsW = Math.max(seg.width, 240)
+  const steps = Svg ? (
+    <Svg key="steps" source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
+  ) : (
+    <Text key="steps">
+      {segments(p).map((stage, i) => (
+        <Text key={`stage-${i}`}>
+          {i > 0 ? ' ' : ''}
+          {stage.map((x, j) => (
+            <Text key={`step-${i}-${j}`} color={x === 'done' ? THEME.ok : x === 'error' ? THEME.bad : undefined} dimColor={x === 'todo'}>
+              ▬
+            </Text>
+          ))}
+        </Text>
+      ))}
+    </Text>
+  )
 
   return (
     <Box key={`bar-${p.id}`} flexDirection="column" width="100%">
-      <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={2} width="100%">
-        <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1}>
+      {gridRow(t, `row-${p.id}`, [
+        <Box key="title" flexDirection="row" alignItems="center" gap={1}>
           <Text color={color}>{STATE_GLYPH[p.state]}</Text>
           <Text wrap="truncate">{p.title}</Text>
-        </Box>
-        {Svg ? (
-          <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
-        ) : (
-          <Text>
-            {segments(p).map((stage, i) => (
-              <Text key={`stage-${i}`}>
-                {i > 0 ? ' ' : ''}
-                {stage.map((x, j) => (
-                  <Text key={`step-${i}-${j}`} color={x === 'done' ? THEME.ok : x === 'error' ? THEME.bad : undefined} dimColor={x === 'todo'}>
-                    ▬
-                  </Text>
-                ))}
-              </Text>
-            ))}
-          </Text>
-        )}
-        <Box flexDirection="row" alignItems="center" gap={1}>
-          <Text color={p.state === 'done' ? THEME.ok : color}>{label}</Text>
-          <Text dimColor>{`${pct}%`}</Text>
-        </Box>
-      </Box>
+        </Box>,
+        steps,
+        <Text key="count" color={p.state === 'done' ? THEME.ok : color} wrap="truncate">
+          {label}
+        </Text>,
+        <Text key="pct" dimColor>{`${pct}%`}</Text>,
+      ])}
       {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
     </Box>
   )
 }
 
-// a thin dim rule across the band, exactly as wide as it: no "…" from a line cut short.
-// Desktop: an Svg wider than any band, which the surface caps at the slot's width (its markup width, up to the slot).
-// Terminal: one "─" per cell of the band.
-const RULE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="1" viewBox="0 0 4000 1" preserveAspectRatio="none"><rect width="4000" height="1" fill="#808080" fill-opacity=".35"/></svg>`
+// the band's grid: four equal columns on every row, so the cells line up down the rows;
+// the first three columns start at their left edge, the fourth ends at the band's right edge
+function gridRow(t: ReturnType<EngineInterface['ui']['resolve']>, key: string, cells: JSX.Element[]) {
+  const { Box } = t
+  return (
+    <Box key={key} flexDirection="row" alignItems="center" width="100%">
+      {cells.map((c, i) => (
+        <Box key={`col-${i}`} width="25%" flexDirection="row" alignItems="center" justifyContent={i === cells.length - 1 ? 'flex-end' : 'flex-start'} paddingRight={i === cells.length - 1 ? 0 : 1}>
+          {c}
+        </Box>
+      ))}
+    </Box>
+  )
+}
 
+// a thin dim rule across the band.
+// Desktop: an Svg at least as wide as the band (~8 CSS px per column, with room to spare), clipped by its full-width box,
+// so it runs edge to edge without the "…" a cut-off text line gets. Terminal: one "─" per cell of the band.
 function hairline(t: ReturnType<EngineInterface['ui']['resolve']>, surface: string, columns: number, key: string) {
   const { Box, Text } = t
   if (surface !== 'terminal' && 'Svg' in t) {
     const { Svg } = t
+    const w = Math.max(400, Math.round((columns || 100) * 12))
+    const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="7" viewBox="0 0 ${w} 7" preserveAspectRatio="none"><rect y="3" width="${w}" height="1" fill="#808080" fill-opacity=".45"/></svg>`
     return (
-      <Box key={key} width="100%" marginY={0}>
-        <Svg source={RULE_SVG} alt="" height={1} />
+      <Box key={key} width="100%" overflow="hidden">
+        <Svg source={source} alt="分隔线" width={w} height={7} />
       </Box>
     )
   }

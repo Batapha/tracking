@@ -58,20 +58,26 @@ for (const surface of SURFACES) {
     })
     const band = await ui.find({ key: 'tracking-usage' })
     expect(band).toBeDefined()
-    const kids = (band?.children ?? []) as { type: string; props: Record<string, unknown> }[]
-    // usage row, a hairline, spend row; both rows run edge to edge
-    expect(kids.map(k => k.type)).toEqual(['Box', surface === 'terminal' ? 'Text' : 'Box', 'Box'])
-    expect(kids[0]?.props.justifyContent).toBe('space-between')
-    expect(kids[2]?.props.justifyContent).toBe('space-between')
+    // a grid: usage row, a hairline, spend row, then the progress row; four equal columns each
+    const row = async (key: string) => ((await ui.find({ key }))?.children ?? []) as { props: Record<string, unknown>; children: unknown[] }[]
+    for (const key of ['row-usage', 'row-spend', 'bar-none']) {
+      const cols = await row(key)
+      expect(cols.map(c => c.props.width)).toEqual(['25%', '25%', '25%', '25%'])
+      expect(cols[3]?.props.justifyContent).toBe('flex-end')
+    }
+    expect((await ui.find({ key: 'row-usage' }))?.text).toMatch(/空闲$/)
+    expect((await ui.find({ key: 'row-spend' }))?.text).toMatch(/详情$/)
     // and a second hairline above the progress row, each exactly the band's width: never cut short with "…"
     if (surface === 'terminal') {
       const rules = await ui.findAll({ type: 'Text', text: /^─+$/ })
       expect(rules.map(r => r.text.length)).toEqual([120, 120])
     } else {
-      const rules = (await ui.findAll({ type: 'Svg' })).filter(r => r.props.alt === '')
+      const rules = (await ui.findAll({ type: 'Svg' })).filter(r => r.props.alt === '分隔线')
       expect(rules).toHaveLength(2)
-      expect(rules[0]?.props.width).toBeUndefined()
-      expect(String(rules[0]?.props.source)).toContain('preserveAspectRatio="none"')
+      // wider than the band (120 columns ≈ 960 px), clipped by its full-width box
+      expect(rules[0]?.props.width).toBeGreaterThan(960)
+      const box = (await ui.findAll({ type: 'Box' })).find(b => b.props.overflow === 'hidden')
+      expect(box?.props.width).toBe('100%')
     }
 
     const text = band?.text ?? ''

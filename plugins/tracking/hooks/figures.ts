@@ -169,11 +169,15 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
     value: pct === null ? '—' : `${pct}%`,
     label: left === null ? 'ctx' : `ctx · 距压缩 ${left}%`,
   })
-  if (opts.showRateLimits) {
-    for (const w of u.rateLimits) {
-      const reset = w.resetsAt ? ` · ${fmtSpan(Date.parse(w.resetsAt) - now)}后重置` : ''
-      usage.push({ key: `rl-${w.kind}`, frac: w.percentUsed / 100, level: quotaLevel(w.percentUsed), value: `${Math.round(w.percentUsed)}%`, label: `${windowLabel(w.kind)}${reset}` })
+  // always the 5h and weekly columns, so the grid keeps its shape; a window not reported reads "—"
+  for (const kind of ['five_hour', 'seven_day']) {
+    const w = opts.showRateLimits ? u.rateLimits.find(r => r.kind === kind) : undefined
+    if (!w) {
+      usage.push({ key: `rl-${kind}`, frac: 0, level: 'off', value: '—', label: windowLabel(kind) })
+      continue
     }
+    const reset = w.resetsAt ? ` · ${fmtSpan(Date.parse(w.resetsAt) - now)}后重置` : ''
+    usage.push({ key: `rl-${kind}`, frac: w.percentUsed / 100, level: quotaLevel(w.percentUsed), value: `${Math.round(w.percentUsed)}%`, label: `${windowLabel(kind)}${reset}` })
   }
 
   const spend: Cell[] = []
@@ -191,15 +195,20 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
     spend.push({ key: 'cache', frac: 0, level: 'off', value: '已失效', label: cost === null ? '缓存' : `缓存 · 下条约多 ${fmtUsd(cost)}`, glyph: 'clock' })
   }
   spend.push({ key: 'cost', frac: 1, level: 'ok', value: total === null ? '$—' : fmtUsd(total), label: '本会话', glyph: '$' })
-  for (const [model, t] of rows.slice(0, 3)) {
+  // one column for the models: the largest, and how many more the details list
+  const [first] = rows
+  if (first) {
+    const [model, t] = first
     const cost = costOf(model, t, u.cacheTtlMs)
-    spend.push({ key: `m-${model}`, frac: 0, level: 'off', value: fmtTokens(sum(t)), label: `${modelLabel(model)}${cost === null ? '' : ` · ${fmtUsd(cost)}`}` })
+    const more = rows.length > 1 ? ` · +${rows.length - 1} 个模型` : ''
+    spend.push({ key: `m-${model}`, frac: 0, level: 'off', value: fmtTokens(sum(t)), label: `${modelLabel(model)}${cost === null ? '' : ` · ${fmtUsd(cost)}`}${more}` })
+  } else {
+    spend.push({ key: 'm-none', frac: 0, level: 'off', value: '—', label: '模型' })
   }
-  if (rows.length > 3) spend.push({ key: 'm-more', frac: 0, level: 'off', value: `+${rows.length - 3}`, label: '个模型' })
   return { usage, spend }
 }
 
-// the two rows: usage (ctx, 5h, weekly) and spend (cache countdown first, then session cost, tokens per model)
+// the grid's first two rows, three cells each before the fourth column: usage (ctx, 5h, weekly) and spend (cache, session cost, models)
 
 // ---------- session title ----------
 

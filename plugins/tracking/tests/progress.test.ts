@@ -67,6 +67,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     } as never)
     const ui = await $.ui.mount({ plugin: 'tracking', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 20, bodyColumns: 120 } as never })
     const bar = await ui.find({ key: 'bar-orders' })
+    // four columns: task, steps, count, percent
+    const cols = ((await ui.find({ key: 'row-orders' }))?.children ?? []) as { props: Record<string, unknown> }[]
+    expect(cols.map(c => c.props.width)).toEqual(['25%', '25%', '25%', '25%'])
     expect(bar?.text).toContain('实现 · 2/4')
     expect(bar?.text).toContain('50%')
     const svg = (await ui.findAll({ type: 'Svg' })).find(x => String(x.props.alt).startsWith('订单模块'))
