@@ -13,10 +13,14 @@ LBH 的 Claude Code 插件市场。
 
 ### 安装
 
+终端版 Claude Code：
+
 ```
-/plugin marketplace add <GitHub 用户名>/claude-mods
+/plugin marketplace add Batapha/tracking
 /plugin install tracking@lbh-mods
 ```
+
+桌面 App 里 /plugin 会打开插件商店：选“本地插件”，上传 plugins/tracking 文件夹（里面直接有 .claude-plugin/plugin.json），不要选仓库根目录。
 
 如果之前装过 plan-progress，先卸载它，两者的进度条会重复：
 
