@@ -33,7 +33,7 @@ test('cost at API prices, cache writes by TTL', () => {
   expect(modelLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
 })
 
-test('usage cells: ctx and quota windows on one row; cost, cache and models on the other', () => {
+test('usage cells: ctx and quota windows on one row; cache first, then cost and models on the other', () => {
   const now = 1_000_000
   const u: Usage = {
     ...at(120_000),
@@ -52,15 +52,15 @@ test('usage cells: ctx and quota windows on one row; cost, cache and models on t
   expect(usage.map(c => c.key)).toEqual(['ctx', 'rl-five_hour', 'rl-seven_day'])
   expect(usage[1]?.level).toBe('warn')
   expect(usage[1]?.label).toContain('5h')
-  expect(spend.map(c => c.key)).toEqual(['cost', 'cache', 'm-claude-opus-5-5', 'm-claude-haiku-4-5'])
-  expect(spend[1]?.value).toBe('4:00')
+  expect(spend.map(c => c.key)).toEqual(['cache', 'cost', 'm-claude-opus-5-5', 'm-claude-haiku-4-5'])
+  expect(spend[0]?.value).toBe('4:00')
     expect(spend.map(c => c.label).join(' ')).toContain('Opus 5.5')
 
   const hidden = usageCells(u, { ...DEFAULTS, showRateLimits: false }, now)
   expect(hidden.usage.map(c => c.key)).toEqual(['ctx'])
 
   const expired = usageCells(u, DEFAULTS, now + 10 * 60_000)
-  expect(expired.spend[1]?.value).toBe('已失效')
+  expect(expired.spend[0]?.value).toBe('已失效')
 })
 
 const plan = (over: Partial<Plan>): Plan => ({

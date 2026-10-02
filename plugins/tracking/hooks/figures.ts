@@ -180,7 +180,6 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
   const rows = Object.entries(u.models).sort((a, b) => sum(b[1]) - sum(a[1]))
   const priced = rows.map(([m, t]) => costOf(m, t, u.cacheTtlMs) ?? 0).reduce((a, b) => a + b, 0)
   const total = u.costUsd ?? (rows.length ? priced : null)
-  spend.push({ key: 'cost', frac: 1, level: 'ok', value: total === null ? '$—' : fmtUsd(total), label: '本会话', glyph: '$' })
   const cache = cacheLeftMs(u, now)
   const ttlLabel = `${u.isTtlKnown ? '' : '≈'}${u.cacheTtlMs >= 3_600_000 ? '1h' : '5m'}`
   if (cache === null) {
@@ -191,6 +190,7 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
     const cost = u.model && u.ctxTokens ? recacheCost(u.model, u.ctxTokens, u.cacheTtlMs) : null
     spend.push({ key: 'cache', frac: 0, level: 'off', value: '已失效', label: cost === null ? '缓存' : `缓存 · 下条约多 ${fmtUsd(cost)}`, glyph: 'clock' })
   }
+  spend.push({ key: 'cost', frac: 1, level: 'ok', value: total === null ? '$—' : fmtUsd(total), label: '本会话', glyph: '$' })
   for (const [model, t] of rows.slice(0, 3)) {
     const cost = costOf(model, t, u.cacheTtlMs)
     spend.push({ key: `m-${model}`, frac: 0, level: 'off', value: fmtTokens(sum(t)), label: `${modelLabel(model)}${cost === null ? '' : ` · ${fmtUsd(cost)}`}` })
@@ -199,7 +199,7 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
   return { usage, spend }
 }
 
-// the two rows: usage (ctx, 5h, weekly) and spend (cost, cache countdown, tokens per model)
+// the two rows: usage (ctx, 5h, weekly) and spend (cache countdown first, then session cost, tokens per model)
 
 // ---------- session title ----------
 
