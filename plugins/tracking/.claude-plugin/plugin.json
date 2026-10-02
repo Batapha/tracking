@@ -1,6 +1,6 @@
 {
   "name": "tracking",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "提示框上方两行用量条（ctx、5h、周限额、缓存倒计时 / 本会话金额、各模型 token），实时进度条，阶段提示音，会话自动命名",
   "author": {
     "name": "LBH"
@@ -34,7 +34,7 @@
     "sounds": {
       "type": "boolean",
       "title": "提示音",
-      "description": "阶段完成、需要你决定、出错、任务完成时播放声音",
+      "description": "需要你决定、出错、任务完成、限额告警时播放声音",
       "default": true
     },
     "speakStages": {

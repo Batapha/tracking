@@ -480,3 +480,49 @@ export const WORK_BEFORE_PLAN = 3 // the 4th changing call without a plan is ref
 export const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update before a reminder
 
 
+
+// ---------- step segments: one short bar per step, green when done, grey otherwise ----------
+
+export type Segment = 'done' | 'error' | 'todo'
+export const SEGMENT_COLOR: Record<Segment, string> = { done: '#30A46C', error: '#E5484D', todo: '#808080' }
+export const SEG_W = 22
+export const SEG_H = 8
+export const SEG_GAP = 4
+export const STAGE_GAP = 10
+
+// each stage's steps in order, as done / error / todo; a finished bar has every step green
+export function segments(p: Plan): Segment[][] {
+  return p.stages.map(s =>
+    s.steps.map(st => (p.state === 'done' || isFinished(st.status) ? 'done' : st.status === 'error' ? 'error' : 'todo')),
+  )
+}
+
+// the bars fit `maxW`: steps shrink (down to 6 px) before the row overflows
+export function segmentsSvg(p: Plan, maxW: number): { source: string; width: number } {
+  const stages = segments(p).filter(s => s.length > 0)
+  const n = stages.reduce((k, s) => k + s.length, 0)
+  const gaps = (n - stages.length) * SEG_GAP + Math.max(0, stages.length - 1) * STAGE_GAP
+  const w = Math.max(6, Math.min(SEG_W, Math.floor((maxW - gaps) / Math.max(1, n))))
+  const width = Math.max(1, n * w + gaps)
+  let x = 0
+  const rects: string[] = []
+  stages.forEach((steps, i) => {
+    if (i > 0) x += STAGE_GAP - SEG_GAP
+    for (const seg of steps) {
+      const fill = SEGMENT_COLOR[seg]
+      const opacity = seg === 'todo' ? ' fill-opacity=".35"' : ''
+      rects.push(`<rect x="${x}" y="0" width="${w}" height="${SEG_H}" rx="${SEG_H / 2}" fill="${fill}"${opacity}/>`)
+      x += w + SEG_GAP
+    }
+  })
+  return { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${SEG_H}">${rects.join('')}</svg>`, width }
+}
+
+// the label beside the bars: "完成 4/4", or the current stage and the steps done in all
+export function segmentsLabel(p: Plan): string {
+  const all = segments(p).flat()
+  const done = all.filter(s => s === 'done').length
+  if (p.state === 'done') return `完成 ${all.length}/${all.length}`
+  const stage = p.stages[where(p).stage]?.name ?? ''
+  return `${stage ? `${stage} · ` : ''}${done}/${all.length}`
+}

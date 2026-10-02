@@ -53,7 +53,7 @@ export function readOptions(raw: unknown): Options {
   }
 }
 
-export type Sound = 'decision' | 'error' | 'done' | 'stage' | 'quota'
+export type Sound = 'decision' | 'error' | 'done' | 'quota'
 
 // green / yellow / red, as the theme names them on the terminal and as hex where an Svg draws
 export type Level = 'ok' | 'warn' | 'bad' | 'off'

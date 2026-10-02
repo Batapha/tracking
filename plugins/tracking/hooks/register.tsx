@@ -5,9 +5,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
-import { TOOL, MAX_BARS, FIGURE_SPACE, STRIP_H, STRIP_GAP, MAX_STRIPS, FOLD_MS, STATE_COLOR, STATE_GLYPH, STATUSES, TRACK_H, NARROW, RULES, str, status, list, isFinished, same, applyOps, normalize, clean, parsePlan, st, DEMO, where, hex, mix, rgb, esc, hash, textWidth, ICON_PATH, lastHead, trackSvg, AGENT_COLOR, elapsed, visibleAgents, lastStrip, MORPH, stripsHeight, stripsSvg, plural, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE } from './bars'
+import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, lastHead, visibleAgents, lastStrip, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel } from './bars'
 import type { Raw, Where } from './bars'
-import { DETAIL_PANE, sum, ctxLevel, ctxPercent, untilCompact, quotaLevel, cacheLeftMs, fmtTokens, fmtUsd, fmtSpan, fmtClock, windowLabel, add, detailMarkdown, ringSvg, GLYPHS, glyphOf, usageCells, renderTitle } from './figures'
+import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, glyphOf, usageCells, renderTitle } from './figures'
 import type { Cell } from './figures'
 import { DEFAULTS, EMPTY_USAGE, readOptions, THEME } from './state'
 import type { Options, Sound } from './state'
@@ -217,8 +217,9 @@ async function drawUsage($: EngineInterface, e: { surface: string }, opts: Optio
   const busy = await read($, activity)
   const { usage: top, spend } = usageCells(u, opts, await $.clock.now())
   const { Box, Text, Button } = elements
-  const Svg = 'Svg' in elements ? elements.Svg : null
   const isTerminal = e.surface === 'terminal'
+  // the terminal's table has Svg but draws it blank: glyphs there
+  const Svg = !isTerminal && 'Svg' in elements ? elements.Svg : null
 
   const cell = (c: Cell, isModel: boolean) => (
     <Box key={c.key} flexDirection="row" alignItems="center" gap={1}>
@@ -239,14 +240,13 @@ async function drawUsage($: EngineInterface, e: { surface: string }, opts: Optio
   const dotLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
 
   return (
-    <Box key="tracking-usage" flexDirection="column">
-      <Box flexDirection="row" alignItems="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
+    <Box key="tracking-usage" flexDirection="column" alignItems="center">
+      <Box flexDirection="row" alignItems="center" justifyContent="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
         <Text color={dotColor}>{`● ${dotLabel}`}</Text>
         {top.map(c => cell(c, false))}
       </Box>
-      <Box flexDirection="row" alignItems="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
-        {spend.map((c, i) => cell(c, i > 0))}
-        <Box flexGrow={1} />
+      <Box flexDirection="row" alignItems="center" justifyContent="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
+        {spend.map(c => cell(c, c.key.startsWith('m-')))}
         <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
         <Button key="tracking-hide" plain dimColor label="✕" onPress={() => update($, isHidden, () => true)} />
       </Box>
@@ -276,14 +276,10 @@ async function putPlan($: EngineInterface, next: Plan) {
     return placeBar(list, next)
   })
   chime($, prev?.state, next.state)
-  // a finished stage gets its own short sound, and is spoken when the person asked for it
+  // a finished stage plays no sound (too frequent); it is spoken only when the person turned that on
   if (prev && next.state === 'running' && next.stages.length > 1) {
     const before = where(prev).stage
-    const after = where(next).stage
-    if (after > before) {
-      play($, 'stage')
-      speak($, `${prev.stages[before]?.name ?? ''} 完成`)
-    }
+    if (where(next).stage > before) speak($, `${prev.stages[before]?.name ?? ''} 完成`)
   }
   if (!prev) await update($, isOpen, () => true)
 }
@@ -471,7 +467,7 @@ function registerProgress(on: On, options: Options) {
       if (agentHome.size > 0 || (await $.clock.now()) < foldUntil) await update($, progressTick, n => n + 1)
     })
     await $.command.register({ name: 'tracking-demo', description: '显示一条示例进度条' })
-    await $.command.register({ name: 'tracking-sounds', description: '试听提示音：阶段完成、等你决定、出错、完成、限额' })
+    await $.command.register({ name: 'tracking-sounds', description: '试听提示音：等你决定、出错、完成、限额' })
     await $.command.register({ name: 'tracking-clear', description: '清掉所有进度条' })
 
     return next(e)
@@ -538,11 +534,11 @@ function registerProgress(on: On, options: Options) {
   })
 
   on('command.run', { command: 'tracking-sounds' }, async $ => {
-    const order: Sound[] = ['stage', 'decision', 'error', 'done', 'quota']
+    const order: Sound[] = ['decision', 'error', 'done', 'quota']
     order.forEach((name, i) => (i === 0 ? play($, name) : $.clock.after(i * 1100, () => play($, name))))
-    if (!opts.sounds) return { text: '提示音已在设置里关闭（/config → tracking → Sounds）。' }
+    if (!opts.sounds) return { text: '提示音已在设置里关闭（/plugin → tracking → 配置 → 提示音）。' }
 
-    return { text: '依次播放：阶段完成、需要你决定、出错、任务完成、额度告警。' }
+    return { text: '依次播放：需要你决定、出错、任务完成、额度告警。' }
   })
 
   // always drawn, so the person sees the mod is loaded; it shows and hides the whole Tracking band
@@ -641,66 +637,60 @@ function registerProgress(on: On, options: Options) {
 }
 
 // the bars under the usage rows; null when there is nothing to show
-async function drawProgress($: EngineInterface, bodyColumns: number, t: ReturnType<EngineInterface['ui']['resolve']>) {
+async function drawProgress($: EngineInterface, surface: string, bodyColumns: number, t: ReturnType<EngineInterface['ui']['resolve']>) {
   const list = await read($, plans)
   if (list.length === 0 || !(await read($, isOpen))) return null
-  {
-    const { Box, Button, Text } = t
-    const Svg = 'Svg' in t ? t.Svg : null
-    const total = Math.max(320, (bodyColumns || 100) * 8)
-    // every bar has the same width and is pinned to the right edge (fixed-width percent, close button),
-    // so rows line up whatever their titles; the slack goes into the gap after the title.
-    // Desktop reports ~8 CSS px per column; glyph, gaps, percent and the close button take ~126 px.
-    const titleWidth = Math.min(Math.round(total * 0.3), Math.max(...list.map(p => Math.round(textWidth(p.title, 6.4)))))
-    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
-    await read($, progressTick)
-    const now = await $.clock.now()
-    // a hairline between task bars, so each bar and its agent strips read as one group
-    const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#808080" fill-opacity=".22"/></svg>`
+  const { Box, Button, Text } = t
+  const Svg = surface !== 'terminal' && 'Svg' in t ? t.Svg : null
+  // desktop reports ~8 CSS px per column; the steps take at most half the band
+  const maxW = Math.max(160, Math.round((bodyColumns || 100) * 8 * 0.5))
+  await read($, progressTick)
+  const now = await $.clock.now()
 
-    return (
-      <Box flexDirection="column" gap={1}>
-        {list.flatMap((p, i) => {
-          const v = visibleAgents(p, now)
-          const stripsH = v ? 5 + stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
-          const source = v
-            ? `<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${TRACK_H + stripsH}">${trackSvg(p, trackW)}<g transform="translate(0 ${TRACK_H + 5})">${stripsSvg(v, trackW, now)}</g></svg>`
-            : trackSvg(p, trackW)
-          const agentsAlt = v ? `; agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}` : ''
-          const line = i > 0 && Svg ? [<Svg key={`div-${p.id}`} source={divider} alt="" width={total} height={1} />] : []
-          const w = where(p)
-          const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
-          const color = STATE_COLOR[p.state]
-          const stageName = p.stages[w.stage]?.name ?? ''
-          const alt =
-            p.state === 'done'
-              ? `${p.title}: done, ${plural(w.total, 'step')}`
-              : `${p.title}: ${stageName}, step ${w.step} of ${w.stageSize}, ${pct}%${p.note ? ` — ${p.note}` : ''}${agentsAlt}`
-          const bar = `${'━'.repeat(Math.round(pct / 4))}${'─'.repeat(25 - Math.round(pct / 4))}`
+  return (
+    <Box flexDirection="column" alignItems="center" gap={1}>
+      {list.map(p => {
+        const v = visibleAgents(p, now)
+        const w = where(p)
+        const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
+        const color = STATE_COLOR[p.state]
+        const label = segmentsLabel(p)
+        const seg = segmentsSvg(p, maxW)
+        const alt = `${p.title}: ${label}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
+        const stripsH = v ? stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
+        const stripsW = Math.max(seg.width, 240)
 
-          return [
-            ...line,
-            <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
+        return (
+          <Box key={`bar-${p.id}`} flexDirection="column" alignItems="center">
+            <Box flexDirection="row" alignItems="center" justifyContent="center" gap={1}>
               <Text color={color}>{STATE_GLYPH[p.state]}</Text>
               <Text wrap="truncate">{p.title}</Text>
-              <Box flexGrow={1} />
               {Svg ? (
-                <Svg source={source} alt={alt} width={trackW} height={TRACK_H + stripsH} />
+                <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
               ) : (
                 <Text>
-                  <Text color={color}>{bar.replace(/─/g, '')}</Text>
-                  <Text dimColor>{bar.replace(/━/g, '')}</Text>
-                  <Text color={color}>{` ${stageName} ${w.step}/${w.stageSize}`}</Text>
+                  {segments(p).map((stage, i) => (
+                    <Text key={`stage-${i}`}>
+                      {i > 0 ? ' ' : ''}
+                      {stage.map((x, j) => (
+                        <Text key={`step-${i}-${j}`} color={x === 'done' ? THEME.ok : x === 'error' ? THEME.bad : undefined} dimColor={x === 'todo'}>
+                          ▬
+                        </Text>
+                      ))}
+                    </Text>
+                  ))}
                 </Text>
               )}
-              <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
+              <Text color={p.state === 'done' ? THEME.ok : color}>{label}</Text>
+              <Text dimColor>{`${pct}%`}</Text>
               <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
-            </Box>,
-          ]
-        })}
-      </Box>
-    )
-  }
+            </Box>
+            {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
+          </Box>
+        )
+      })}
+    </Box>
+  )
 }
 
 // ---------- session title and the band ----------
@@ -721,12 +711,12 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
     const t = $.ui.resolve(e)
     const top = await drawUsage($, e, opts, t)
-    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.props.bodyColumns, t)
+    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.surface, e.props.bodyColumns, t)
     if (!top && !bars) return next(e)
     const { Box } = t
 
     return (
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" alignItems="center" gap={1}>
         {top}
         {bars}
       </Box>
