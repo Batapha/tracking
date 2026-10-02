@@ -1,6 +1,6 @@
-# lbh-mods
+# batapha-mods
 
-LBH 的 Claude Code 插件市场。
+Batapha 的 Claude Code 插件市场。
 
 ## Tracking
 
@@ -18,7 +18,7 @@ LBH 的 Claude Code 插件市场。
 
 ```
 /plugin marketplace add Batapha/tracking
-/plugin install tracking@lbh-mods
+/plugin install tracking@batapha-mods
 ```
 
 桌面 App 里 /plugin 会打开插件商店：选“本地插件”，上传 plugins/tracking 文件夹（里面直接有 .claude-plugin/plugin.json），不要选仓库根目录。
@@ -31,11 +31,13 @@ LBH 的 Claude Code 插件市场。
 
 ### 更新
 
+> 0.2.1 起市场名从 lbh-mods 改为 batapha-mods。之前用 lbh-mods 装过的，先运行 `claude plugin marketplace remove lbh-mods`，再按上面的安装命令重装。
+
 在 Mac 的终端（不是 Claude Code 里）运行，然后重启 Claude Code：
 
 ```
-claude plugin marketplace update lbh-mods
-claude plugin update tracking@lbh-mods
+claude plugin marketplace update batapha-mods
+claude plugin update tracking@batapha-mods
 ```
 
 ### 命令

@@ -77,8 +77,8 @@ const plan = (over: Partial<Plan>): Plan => ({
 })
 
 test('session title from the template', () => {
-  expect(renderTitle('{project} · {task}', '/Users/lbh/shop/', [])).toBe('shop')
-  expect(renderTitle('{project} · {task}', '/Users/lbh/shop', [plan({})])).toBe('shop · 订单模块')
-  expect(renderTitle('{project} · {task} · {stage}', '/Users/lbh/shop', [plan({})])).toBe('shop · 订单模块 · 实现')
-  expect(renderTitle('{task}', '/Users/lbh/shop', [plan({ state: 'done' })])).toBe('shop')
+  expect(renderTitle('{project} · {task}', '/Users/batapha/shop/', [])).toBe('shop')
+  expect(renderTitle('{project} · {task}', '/Users/batapha/shop', [plan({})])).toBe('shop · 订单模块')
+  expect(renderTitle('{project} · {task} · {stage}', '/Users/batapha/shop', [plan({})])).toBe('shop · 订单模块 · 实现')
+  expect(renderTitle('{task}', '/Users/batapha/shop', [plan({ state: 'done' })])).toBe('shop')
 })

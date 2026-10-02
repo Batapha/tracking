@@ -36,7 +36,7 @@ for (const surface of SURFACES) {
       return { turnId: 't1', index: 0, answer: 'ok', toolUses: [], stopReason: 'end_turn', usage: USED }
     })
 
-    await $.session.start({ cwd: '/Users/lbh/shop', surface, isInteractive: true })
+    await $.session.start({ cwd: '/Users/batapha/shop', surface, isInteractive: true })
     const stream = $.turn.step(STEP)
     for await (const _ of stream) void _
     await $.session.measure({
@@ -101,6 +101,6 @@ test('the ledger keeps tokens per model and per subagent', async ($, on) => {
 
 test('the session title follows the template', { options: { titleTemplate: '{project} · {task}' } }, async ($, on) => {
   on('classic.SessionStart', async () => ({}))
-  const result = await $.classic.SessionStart({ source: 'startup', cwd: '/Users/lbh/shop' } as never)
+  const result = await $.classic.SessionStart({ source: 'startup', cwd: '/Users/batapha/shop' } as never)
   expect(result).toMatchObject({ sessionTitle: 'shop' })
 })

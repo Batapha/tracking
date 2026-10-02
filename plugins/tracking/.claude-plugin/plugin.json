@@ -1,9 +1,9 @@
 {
   "name": "tracking",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "提示框上方两行用量条（ctx、5h、周限额、缓存倒计时 / 本会话金额、各模型 token），实时进度条，阶段提示音，会话自动命名",
   "author": {
-    "name": "LBH"
+    "name": "Batapha"
   },
   "license": "MIT",
   "types": "./types/index.d.ts",

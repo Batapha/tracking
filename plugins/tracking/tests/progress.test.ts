@@ -28,7 +28,7 @@ test('finishing a stage plays no sound and the session is renamed', async ($, on
   await $.tool.call({ tool: TOOL, id: 'orders', next: true } as never)
   expect(played).toEqual([])
 
-  const titled = await $.classic.UserPromptSubmit({ prompt: '继续', cwd: '/Users/lbh/shop' } as never)
+  const titled = await $.classic.UserPromptSubmit({ prompt: '继续', cwd: '/Users/batapha/shop' } as never)
   expect(titled).toMatchObject({ sessionTitle: 'shop · 订单模块' })
 })
 
