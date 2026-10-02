@@ -75,9 +75,9 @@ for (const surface of SURFACES) {
     await clock.advance(60_000)
     expect((await ui.find({ key: 'tracking-usage' }))?.text).toContain('4:00')
 
-    // ✕ hides the band
-    await ui.press({ key: 'tracking-hide' })
-    expect(await ui.find({ key: 'tracking-usage' })).toBeUndefined()
+    // the band has no close button; the progress row is there before any task
+    expect(await ui.find({ type: 'Button', text: '✕' })).toBeUndefined()
+    expect((await ui.find({ key: 'bar-none' }))?.text).toContain('暂无进行中的任务')
   })
 }
 

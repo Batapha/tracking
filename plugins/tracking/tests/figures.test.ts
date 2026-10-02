@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Plan, Usage } from '../types'
 import { ctxLevel, renderTitle, usageCells } from '../hooks/figures'
 import { costOf, modelLabel } from '../hooks/pricing'
+import { shownBar } from '../hooks/bars'
 import { DEFAULTS, EMPTY_USAGE } from '../hooks/state'
 
 const cents = (n: number | null) => (n === null ? null : Math.round(n * 100))
@@ -81,4 +82,14 @@ test('session title from the template', () => {
   expect(renderTitle('{project} · {task}', '/Users/batapha/shop', [plan({})])).toBe('shop · 订单模块')
   expect(renderTitle('{project} · {task} · {stage}', '/Users/batapha/shop', [plan({})])).toBe('shop · 订单模块 · 实现')
   expect(renderTitle('{task}', '/Users/batapha/shop', [plan({ state: 'done' })])).toBe('shop')
+})
+
+test('the third row shows the latest open task, else the latest bar', () => {
+  const a = plan({ id: 'a', title: 'A' })
+  const b = plan({ id: 'b', title: 'B', state: 'done' })
+  const c = plan({ id: 'c', title: 'C' })
+  expect(shownBar([])).toBeNull()
+  expect(shownBar([a, b])?.id).toBe('a')
+  expect(shownBar([a, b, c])?.id).toBe('c')
+  expect(shownBar([b])?.id).toBe('b')
 })

@@ -526,3 +526,9 @@ export function segmentsLabel(p: Plan): string {
   const stage = p.stages[where(p).stage]?.name ?? ''
   return `${stage ? `${stage} · ` : ''}${done}/${all.length}`
 }
+
+// the one bar the band's third row shows: the latest open task, else the latest agents bar still running, else the latest bar
+export function shownBar(list: readonly Plan[]): Plan | null {
+  const latest = (f: (p: Plan) => boolean) => [...list].reverse().find(f) ?? null
+  return latest(isOpenPlan) ?? latest(p => p.state !== 'done') ?? latest(() => true)
+}

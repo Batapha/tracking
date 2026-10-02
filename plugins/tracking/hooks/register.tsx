@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
-import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, lastHead, visibleAgents, lastStrip, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel } from './bars'
+import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, visibleAgents, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, shownBar } from './bars'
 import type { Raw, Where } from './bars'
 import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, glyphOf, usageCells, renderTitle } from './figures'
 import type { Cell } from './figures'
@@ -248,7 +248,6 @@ async function drawUsage($: EngineInterface, e: { surface: string }, opts: Optio
       <Box flexDirection="row" alignItems="center" justifyContent="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
         {spend.map(c => cell(c, c.key.startsWith('m-')))}
         <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
-        <Button key="tracking-hide" plain dimColor label="✕" onPress={() => update($, isHidden, () => true)} />
       </Box>
     </Box>
   )
@@ -313,12 +312,6 @@ async function editAgent($: EngineInterface, agentId: string, change: (a: AgentR
   )
   if (isFolding) foldUntil = now + FOLD_MS + 1500
   if (before !== undefined && after !== undefined) chime($, before, after)
-}
-
-async function dropPlan($: EngineInterface, id: string) {
-  lastHead.delete(id)
-  for (const p of await read($, plans)) if (p.id === id) for (const a of p.agents ?? []) lastStrip.delete(a.id)
-  await update($, plans, list => list.filter(p => p.id !== id))
 }
 
 function registerProgress(on: On, options: Options) {
@@ -636,59 +629,59 @@ function registerProgress(on: On, options: Options) {
   })
 }
 
-// the bars under the usage rows; null when there is nothing to show
+// the third row: always there, one bar (the current task), or a dim placeholder before the first one
 async function drawProgress($: EngineInterface, surface: string, bodyColumns: number, t: ReturnType<EngineInterface['ui']['resolve']>) {
-  const list = await read($, plans)
-  if (list.length === 0 || !(await read($, isOpen))) return null
-  const { Box, Button, Text } = t
+  const p = shownBar(await read($, plans))
+  const { Box, Text } = t
   const Svg = surface !== 'terminal' && 'Svg' in t ? t.Svg : null
   // desktop reports ~8 CSS px per column; the steps take at most half the band
   const maxW = Math.max(160, Math.round((bodyColumns || 100) * 8 * 0.5))
   await read($, progressTick)
   const now = await $.clock.now()
 
-  return (
-    <Box flexDirection="column" alignItems="center" gap={1}>
-      {list.map(p => {
-        const v = visibleAgents(p, now)
-        const w = where(p)
-        const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
-        const color = STATE_COLOR[p.state]
-        const label = segmentsLabel(p)
-        const seg = segmentsSvg(p, maxW)
-        const alt = `${p.title}: ${label}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
-        const stripsH = v ? stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
-        const stripsW = Math.max(seg.width, 240)
+  if (!p) {
+    return (
+      <Box key="bar-none" flexDirection="row" alignItems="center" justifyContent="center" gap={1}>
+        <Text dimColor>○ 暂无进行中的任务</Text>
+      </Box>
+    )
+  }
 
-        return (
-          <Box key={`bar-${p.id}`} flexDirection="column" alignItems="center">
-            <Box flexDirection="row" alignItems="center" justifyContent="center" gap={1}>
-              <Text color={color}>{STATE_GLYPH[p.state]}</Text>
-              <Text wrap="truncate">{p.title}</Text>
-              {Svg ? (
-                <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
-              ) : (
-                <Text>
-                  {segments(p).map((stage, i) => (
-                    <Text key={`stage-${i}`}>
-                      {i > 0 ? ' ' : ''}
-                      {stage.map((x, j) => (
-                        <Text key={`step-${i}-${j}`} color={x === 'done' ? THEME.ok : x === 'error' ? THEME.bad : undefined} dimColor={x === 'todo'}>
-                          ▬
-                        </Text>
-                      ))}
-                    </Text>
-                  ))}
-                </Text>
-              )}
-              <Text color={p.state === 'done' ? THEME.ok : color}>{label}</Text>
-              <Text dimColor>{`${pct}%`}</Text>
-              <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
-            </Box>
-            {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
-          </Box>
-        )
-      })}
+  const v = visibleAgents(p, now)
+  const w = where(p)
+  const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
+  const color = STATE_COLOR[p.state]
+  const label = segmentsLabel(p)
+  const seg = segmentsSvg(p, maxW)
+  const alt = `${p.title}: ${label}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
+  const stripsH = v ? stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
+  const stripsW = Math.max(seg.width, 240)
+
+  return (
+    <Box key={`bar-${p.id}`} flexDirection="column" alignItems="center">
+      <Box flexDirection="row" alignItems="center" justifyContent="center" gap={1}>
+        <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+        <Text wrap="truncate">{p.title}</Text>
+        {Svg ? (
+          <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
+        ) : (
+          <Text>
+            {segments(p).map((stage, i) => (
+              <Text key={`stage-${i}`}>
+                {i > 0 ? ' ' : ''}
+                {stage.map((x, j) => (
+                  <Text key={`step-${i}-${j}`} color={x === 'done' ? THEME.ok : x === 'error' ? THEME.bad : undefined} dimColor={x === 'todo'}>
+                    ▬
+                  </Text>
+                ))}
+              </Text>
+            ))}
+          </Text>
+        )}
+        <Text color={p.state === 'done' ? THEME.ok : color}>{label}</Text>
+        <Text dimColor>{`${pct}%`}</Text>
+      </Box>
+      {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
     </Box>
   )
 }
