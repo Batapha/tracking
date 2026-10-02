@@ -58,8 +58,13 @@ for (const surface of SURFACES) {
     })
     const band = await ui.find({ key: 'tracking-usage' })
     expect(band).toBeDefined()
-    const rows = (band?.children ?? []).filter(c => typeof c === 'object')
-    expect(rows).toHaveLength(2)
+    const kids = (band?.children ?? []) as { type: string; props: Record<string, unknown> }[]
+    // usage row, a hairline, spend row; both rows run edge to edge
+    expect(kids.map(k => k.type)).toEqual(['Box', 'Text', 'Box'])
+    expect(kids[0]?.props.justifyContent).toBe('space-between')
+    expect(kids[2]?.props.justifyContent).toBe('space-between')
+    // and a second hairline above the progress row
+    expect(await ui.findAll({ type: 'Text', text: /^─+$/ })).toHaveLength(2)
 
     const text = band?.text ?? ''
     expect(text).toContain('51%') // ctx

@@ -240,12 +240,13 @@ async function drawUsage($: EngineInterface, e: { surface: string }, opts: Optio
   const dotLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
 
   return (
-    <Box key="tracking-usage" flexDirection="column" alignItems="center">
-      <Box flexDirection="row" alignItems="center" justifyContent="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
+    <Box key="tracking-usage" flexDirection="column" width="100%">
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={isTerminal ? 3 : 4} flexWrap="wrap" width="100%">
         <Text color={dotColor}>{`● ${dotLabel}`}</Text>
         {top.map(c => cell(c, false))}
       </Box>
-      <Box flexDirection="row" alignItems="center" justifyContent="center" columnGap={isTerminal ? 3 : 4} flexWrap="wrap">
+      {hairline(elements, 'line-usage')}
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={isTerminal ? 3 : 4} flexWrap="wrap" width="100%">
         {spend.map(c => cell(c, c.key.startsWith('m-')))}
         <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
       </Box>
@@ -641,7 +642,7 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
 
   if (!p) {
     return (
-      <Box key="bar-none" flexDirection="row" alignItems="center" justifyContent="center" gap={1}>
+      <Box key="bar-none" flexDirection="row" alignItems="center" width="100%">
         <Text dimColor>○ 暂无进行中的任务</Text>
       </Box>
     )
@@ -658,10 +659,12 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   const stripsW = Math.max(seg.width, 240)
 
   return (
-    <Box key={`bar-${p.id}`} flexDirection="column" alignItems="center">
-      <Box flexDirection="row" alignItems="center" justifyContent="center" gap={1}>
-        <Text color={color}>{STATE_GLYPH[p.state]}</Text>
-        <Text wrap="truncate">{p.title}</Text>
+    <Box key={`bar-${p.id}`} flexDirection="column" width="100%">
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={2} width="100%">
+        <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1}>
+          <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+          <Text wrap="truncate">{p.title}</Text>
+        </Box>
         {Svg ? (
           <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
         ) : (
@@ -678,11 +681,23 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
             ))}
           </Text>
         )}
-        <Text color={p.state === 'done' ? THEME.ok : color}>{label}</Text>
-        <Text dimColor>{`${pct}%`}</Text>
+        <Box flexDirection="row" alignItems="center" gap={1}>
+          <Text color={p.state === 'done' ? THEME.ok : color}>{label}</Text>
+          <Text dimColor>{`${pct}%`}</Text>
+        </Box>
       </Box>
       {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
     </Box>
+  )
+}
+
+// a thin dim rule across the band; text, so it draws the same on every surface and truncates to the width
+function hairline(t: ReturnType<EngineInterface['ui']['resolve']>, key: string) {
+  const { Text } = t
+  return (
+    <Text key={key} dimColor wrap="truncate">
+      {'─'.repeat(400)}
+    </Text>
   )
 }
 
@@ -709,8 +724,9 @@ export const register: Register = (on, options) => {
     const { Box } = t
 
     return (
-      <Box flexDirection="column" alignItems="center" gap={1}>
+      <Box flexDirection="column" width="100%">
         {top}
+        {top && bars ? hairline(t, 'line-progress') : null}
         {bars}
       </Box>
     )
