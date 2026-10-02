@@ -47,7 +47,7 @@ claude plugin update tracking@batapha-mods
 | 命令 | 作用 |
 | --- | --- |
 | `/tracking` | 显示或隐藏用量条 |
-| `/tracking-detail` | 打开详情面板：各模型、各子代理的 token 和金额 |
+| `/tracking-detail` | 打开详情面板：各模型、各子代理的 token 和金额；有子代理在跑时，第 2 行的“详情 ›”会变成“子代理 N ›”，点开先列出每个子代理的状态、当前工具和用时 |
 | `/tracking-demo` | 显示一条示例进度条 |
 | `/tracking-sounds` | 试听所有提示音 |
 | `/tracking-clear` | 清掉所有进度条 |

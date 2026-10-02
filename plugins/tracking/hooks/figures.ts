@@ -1,5 +1,6 @@
 
-import type { ModelTokens, Plan, RateWindow, Usage } from '../types'
+import type { AgentRun, ModelTokens, Plan, RateWindow, Usage } from '../types'
+import { elapsed } from './bars'
 import { costOf, modelLabel, recacheCost } from './pricing'
 import { HEX } from './state'
 import type { Level, Options } from './state'
@@ -81,8 +82,49 @@ export const add = (a: ModelTokens | undefined, input: number, output: number, c
 
 // ---------- drawing ----------
 
-export function detailMarkdown(u: Usage, now: number): string {
+// ---------- subagents ----------
+// they no longer get a row of their own: the 详情 cell counts the live ones and the pane lists them
+
+const isLive = (a: AgentRun) => a.state === 'running' || a.state === 'waiting'
+
+// every run the bars still hold, the unfinished first, then the newest
+export function agentRuns(list: Plan[]): AgentRun[] {
+  return list.flatMap(p => p.agents ?? []).sort((a, b) => Number(isLive(b)) - Number(isLive(a)) || b.startedAt - a.startedAt)
+}
+
+// the 详情 cell: how many run now, and whether one of them waits on a permission
+export function agentsCell(runs: AgentRun[]): { label: string; live: number; isWaiting: boolean } {
+  const live = runs.filter(isLive)
+  return { label: live.length > 0 ? `子代理 ${live.length} ›` : '详情 ›', live: live.length, isWaiting: live.some(a => a.state === 'waiting') }
+}
+
+const RUN_STATE: Record<AgentRun['state'], string> = { running: '运行中', waiting: '等你批准', done: '完成', error: '出错' }
+const cellText = (s: string) => s.replace(/\|/g, '/').replace(/\n/g, ' ')
+
+function agentLines(u: Usage, runs: AgentRun[], now: number): string[] {
+  const seen = new Set(runs.map(a => a.id))
+  const rest = Object.entries(u.agents)
+    .filter(([id]) => !seen.has(id))
+    .sort((a, b) => b[1].tokens - a[1].tokens)
+  if (runs.length === 0 && rest.length === 0) return []
+  const live = runs.filter(isLive).length
+  const lines = ['', live > 0 ? `**子代理**（${live} 个在运行）` : '**子代理**', '']
+  lines.push('| 子代理 | 状态 | 当前工具 | 用时 | 模型 | tokens |')
+  lines.push('| --- | --- | --- | ---: | --- | ---: |')
+  for (const a of runs.slice(0, 20)) {
+    const t = u.agents[a.id]
+    lines.push(`| ${cellText(a.title)} | ${RUN_STATE[a.state]} | ${isLive(a) ? cellText(a.tool) : '—'} | ${elapsed((a.endedAt ?? now) - a.startedAt)} | ${t ? modelLabel(t.model) : '—'} | ${t ? fmtTokens(t.tokens) : '—'} |`)
+  }
+  for (const [, a] of rest.slice(0, Math.max(0, 20 - runs.length))) lines.push(`| ${cellText(a.title)} | 完成 | — | — | ${modelLabel(a.model)} | ${fmtTokens(a.tokens)} |`)
+  return lines
+}
+
+export function detailMarkdown(u: Usage, now: number, runs: AgentRun[] = []): string {
   const lines: string[] = []
+  const agents = agentLines(u, runs, now)
+  // opened from "子代理 N ›": the running agents come first
+  const isAgentsFirst = runs.some(isLive)
+  if (isAgentsFirst) lines.push(...agents.slice(1), '')
   const pct = ctxPercent(u)
   const left = untilCompact(u)
   lines.push('**上下文**')
@@ -118,15 +160,7 @@ export function detailMarkdown(u: Usage, now: number): string {
     lines.push('')
     lines.push(`本会话总额 ${fmtUsd(u.costUsd)}（与 /cost 一致）。`)
   }
-  const agents = Object.values(u.agents).sort((a, b) => b.tokens - a.tokens)
-  if (agents.length > 0) {
-    lines.push('')
-    lines.push('**子代理**')
-    lines.push('')
-    lines.push('| 子代理 | 模型 | tokens |')
-    lines.push('| --- | --- | ---: |')
-    for (const a of agents.slice(0, 20)) lines.push(`| ${a.title.replace(/\|/g, '/')} | ${modelLabel(a.model)} | ${fmtTokens(a.tokens)} |`)
-  }
+  if (!isAgentsFirst) lines.push(...agents)
   if (u.rateLimits.length > 0) {
     lines.push('')
     lines.push('**额度**')
@@ -162,6 +196,11 @@ export function iconSvg(icon: Exclude<Icon, 'ring'>): string {
 export const ICON_GLYPH: Record<Exclude<Icon, 'ring'>, string> = { clock: '◷', coin: '$', cube: '◆', info: '≡', steps: '▸' }
 export function dotSvg(level: Level): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="${HEX[level]}"/></svg>`
+}
+
+// the 详情 cell while subagents run: a dot in their own colour, pulsing
+export function pulseDotSvg(color: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><style>.p{animation:p 1.1s ease-in-out infinite}@keyframes p{50%{opacity:.3}}@media (prefers-reduced-motion:reduce){.p{animation:none}}</style><circle class="p" cx="8" cy="8" r="3" fill="${color}"/></svg>`
 }
 
 export const GLYPHS = ['○', '◔', '◑', '◕', '●']

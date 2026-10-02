@@ -8,10 +8,7 @@ export const TOOL = 'mcp__tracking__plan_progress'
 export const MAX_BARS = 3
 // a space as wide as a digit, so '  0%' and '100%' take the same room
 export const FIGURE_SPACE = String.fromCharCode(0x2007)
-export const STRIP_H = 18
-export const STRIP_GAP = 3
-export const MAX_STRIPS = 4 // past this, the finished ones fold into one "+N more" strip
-export const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until the bar closes
+export const FOLD_MS = 5000 // finished subagent runs keep the bar ticking this long
 
 export const STATE_COLOR: Record<PlanState, string> = { running: '#8B7CF6', needs_input: '#E09A1E', error: '#E5484D', done: '#30A46C' }
 export const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '!', done: '✓' }
@@ -314,93 +311,9 @@ rect[class]{width:2px;height:2px}
 <g transform="translate(${kx.toFixed(1)} 0)">${glideKnob}${knob}</g></svg>`
 }
 
-export const AGENT_COLOR: Record<AgentRun['state'], string> = {
-  running: STATE_COLOR.running,
-  waiting: STATE_COLOR.needs_input,
-  done: STATE_COLOR.done,
-  error: STATE_COLOR.error,
-}
-
 export const elapsed = (ms: number) => {
   const sec = Math.max(0, Math.round(ms / 1000))
   return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`
-}
-
-// which strips show: all of a small batch; in a big one the unfinished first, the rest folded into one line
-export function visibleAgents(p: Plan, now: number): { shown: AgentRun[]; hidden: AgentRun[] } | null {
-  const list = p.agents ?? []
-  if (list.length === 0) return null
-  const hasError = list.some(a => a.state === 'error')
-  if (p.agentsDoneAt && now - p.agentsDoneAt > FOLD_MS && !hasError) return null
-  if (list.length <= MAX_STRIPS) return { shown: list, hidden: [] }
-  const keep = new Set(list.filter(a => a.state !== 'done').slice(0, MAX_STRIPS - 1).map(a => a.id))
-  for (const a of [...list].reverse()) {
-    if (keep.size >= MAX_STRIPS - 1) break
-    keep.add(a.id)
-  }
-  return { shown: list.filter(a => keep.has(a.id)), hidden: list.filter(a => !keep.has(a.id)) }
-}
-
-// what each strip showed last time it was drawn, so a change morphs from the old status instead of jumping
-export const lastStrip = new Map<string, { tool: string; color: string }>()
-export const MORPH = '.2s'
-
-export const stripsHeight = (n: number) => n * STRIP_H + (n - 1) * STRIP_GAP
-
-// one tinted strip per agent: state colour, name, what it does now and for how long; not a progress bar
-export function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now: number): string {
-  const isNarrow = W < NARROW
-  const rows: string[] = []
-  v.shown.forEach((a, i) => {
-    const c = AGENT_COLOR[a.state]
-    const y = i * (STRIP_H + STRIP_GAP)
-    const indent = a.depth > 0 ? 12 : 0
-    let px = ''
-    if (a.state === 'running') {
-      for (let col = 0; col * 3 < W; col++) {
-        for (let r = 0; r < 4; r++) {
-          if (hash(col + i * 41, r, 5) > 0.2) continue
-          px += `<rect x="${col * 3}" y="${y + 3 + r * 3.6}" class="t${Math.floor(hash(col, r, 6) * 4)}" fill="${c}" fill-opacity=".32"/>`
-        }
-      }
-    }
-    const nameRoom = isNarrow ? W - 30 - indent : W * 0.5
-    let name = (a.depth > 0 ? '↳ ' : '') + a.title
-    while (name.length > 4 && textWidth(name, 6.2) > nameRoom) name = name.slice(0, -1)
-    if (name !== (a.depth > 0 ? '↳ ' : '') + a.title) name = name.trimEnd() + '…'
-    const nameX = 19 + indent
-    const toolX = nameX + textWidth(name, 6.2) + 8
-    const time = elapsed((a.endedAt ?? now) - a.startedAt)
-    // a status change: the old word blurs out while the new one blurs in, and the tint flows to the new colour
-    const was = lastStrip.get(a.id)
-    lastStrip.set(a.id, { tool: a.tool, color: c })
-    const isToolChanged = was !== undefined && was.tool !== a.tool
-    const flow = (attr: string) => (was && was.color !== c ? `<animate attributeName="${attr}" from="${was.color}" to="${c}" dur="${MORPH}" fill="freeze"/>` : '')
-    const tool = isNarrow
-      ? ''
-      : (isToolChanged ? `<text x="${toolX}" y="${y + 12.5}" class="sn mo" style="fill:${was.color}">${esc(was.tool)}</text>` : '') +
-        `<text x="${toolX}" y="${y + 12.5}" class="sn${isToolChanged ? ' mi' : ''}" style="fill:${c}">${esc(a.tool)}</text>` +
-        `<text x="${W - 9}" y="${y + 12.5}" text-anchor="end" class="sn st">${time}</text>`
-    rows.push(
-      `<rect x="0" y="${y}" width="${W}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="${c}" fill-opacity=".15">${flow('fill')}</rect>${px}` +
-        `<circle cx="${10 + indent}" cy="${y + STRIP_H / 2}" r="3" fill="${c}"${a.state === 'running' ? ' class="sd"' : ''}>${flow('fill')}</circle>` +
-        `<text x="${nameX}" y="${y + 12.5}" class="sn">${esc(name)}</text>` +
-        tool,
-    )
-  })
-  if (v.hidden.length > 0) {
-    const y = v.shown.length * (STRIP_H + STRIP_GAP)
-    const doneCount = v.hidden.filter(a => a.state === 'done').length
-    rows.push(
-      `<rect x="0" y="${y}" width="${W}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
-        `<text x="10" y="${y + 12.5}" class="sn st">+${v.hidden.length} 个子代理 · ${doneCount} 个已完成</text>`,
-    )
-  }
-  return `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#F0EEFC}.st{fill-opacity:.65}
-.sd{animation:sp 1.1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
-.mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
-.mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
-@media (prefers-reduced-motion:reduce){.sd,.mi,.mo{animation:none}.mo{opacity:0}}</style>${rows.join('')}`
 }
 
 export function plural(n: number, word: string) {

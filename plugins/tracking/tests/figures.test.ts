@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Plan, Usage } from '../types'
-import { bandLayout, columnContent, ctxLevel, renderTitle, usageCells } from '../hooks/figures'
+import type { AgentRun, Plan, Usage } from '../types'
+import { agentRuns, agentsCell, bandLayout, columnContent, ctxLevel, detailMarkdown, renderTitle, usageCells } from '../hooks/figures'
 import { costOf, modelLabel } from '../hooks/pricing'
 import { shownBar } from '../hooks/bars'
 import { DEFAULTS, EMPTY_USAGE } from '../hooks/state'
@@ -123,4 +123,18 @@ test('band layout: each group as wide as its widest value and label, the room le
   for (const c of tight) expect(parseInt(c.group)).toBeLessThanOrEqual(88)
   // cells count CJK as two
   expect(columnContent(['$2.41'], ['Opus 5.5 · 3.8M', '本会话'])).toEqual({ value: 6, label: 15, wide: 0 })
+})
+
+test('running subagents turn the 详情 cell into a count and lead the detail pane', () => {
+  const run = (id: string, state: AgentRun['state'], startedAt: number): AgentRun => ({ id, title: id, state, tool: 'Read', startedAt, endedAt: state === 'done' ? startedAt + 30_000 : null, depth: 0 })
+  const plan: Plan = { id: 'p', title: '复核', kind: 'plan', stages: [], state: 'running', note: null, startedAt: 0, agents: [run('旧的', 'done', 0), run('第1轮独立复核', 'running', 1000)] }
+  const runs = agentRuns([plan])
+  expect(runs[0]?.title).toBe('第1轮独立复核')
+  expect(agentsCell(runs)).toEqual({ label: '子代理 1 ›', live: 1, isWaiting: false })
+  expect(agentsCell([run('a', 'done', 0)]).label).toBe('详情 ›')
+  expect(agentsCell([run('a', 'waiting', 0)]).isWaiting).toBe(true)
+  const md = detailMarkdown({ ...EMPTY_USAGE }, 135_000, runs)
+  expect(md.startsWith('**子代理**（1 个在运行）')).toBe(true)
+  expect(md).toContain('| 第1轮独立复核 | 运行中 | Read | 2m 14s |')
+  expect(md).toContain('| 旧的 | 完成 | — | 30s |')
 })

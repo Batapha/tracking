@@ -5,9 +5,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
-import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, visibleAgents, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, segmentsCount, shownBar } from './bars'
+import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, segmentsCount, shownBar } from './bars'
 import type { Raw, Where } from './bars'
-import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, glyphOf, usageCells, renderTitle, cells, columnContent, bandLayout } from './figures'
+import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, glyphOf, usageCells, renderTitle, cells, columnContent, bandLayout, agentRuns, agentsCell, pulseDotSvg } from './figures'
 import type { Cell, ColumnLayout, Icon } from './figures'
 import { CONTROL, CONTROL_SPEC, readControl, settingRowKey, statusText, settingLine } from './control'
 import type { SettingKey } from './control'
@@ -240,7 +240,8 @@ function registerUsage(on: On, options: Options) {
   on('ui.render', { component: 'Pane', requestId: DETAIL_PANE }, async ($, e) => {
     const { Markdown } = $.ui.resolve(e)
     await read($, tick)
-    return <Markdown text={detailMarkdown(await read($, usage), await $.clock.now())} />
+    await read($, progressTick)
+    return <Markdown text={detailMarkdown(await read($, usage), await $.clock.now(), agentRuns(await read($, plans)))} />
   })
 
 }
@@ -256,17 +257,19 @@ async function drawUsage($: EngineInterface, e: { surface: string; props: { body
   const draw = (c: Cell, i: number) => slot(t, e.surface, c.key, col(i), iconOf(t, e.surface, c.icon, c.frac, c.level, c.label), c.value, <Text dimColor wrap="truncate">{c.label}</Text>, c.level)
   const statusLevel: Level = busy === 'waiting' ? 'warn' : busy === 'running' ? 'ok' : 'off'
   const statusLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
+  // while subagents run the 详情 cell counts them; the pane lists what each one does
+  const agents = agentsCell(agentRuns(await read($, plans)))
   const status = slot(t, e.surface, 'status', col(3), dotOf(t, e.surface, statusLevel, statusLabel), '', null, 'ok', <Text dimColor>{statusLabel}</Text>)
   const detail = slot(
     t,
     e.surface,
     'tracking-detail',
     col(3),
-    iconOf(t, e.surface, 'info', 0, 'off', '详情'),
+    agents.live > 0 ? agentDotOf(t, e.surface, agents.isWaiting ? STATE_COLOR.needs_input : STATE_COLOR.running, agents.label) : iconOf(t, e.surface, 'info', 0, 'off', '详情'),
     '',
     null,
     'ok',
-    <Button plain dimColor label="详情 ›" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />,
+    <Button plain dimColor label={agents.label} onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />,
   )
 
   return (
@@ -351,6 +354,16 @@ function dotOf(t: Elements, surface: string, level: Level, name: string): JSX.El
   return <Text color={THEME[level]}>•</Text>
 }
 
+// the 详情 cell while subagents run: purple, amber when one waits on a permission; it pulses on desktop
+function agentDotOf(t: Elements, surface: string, color: string, name: string): JSX.Element {
+  const { Text } = t
+  if (surface !== 'terminal' && 'Svg' in t) {
+    const { Svg } = t
+    return <Svg source={pulseDotSvg(color)} alt={name} width={16} height={16} />
+  }
+  return <Text color={color}>•</Text>
+}
+
 // ---------- progress bars ----------
 
 // ---------- engine glue ----------
@@ -382,15 +395,15 @@ async function putPlan($: EngineInterface, next: Plan) {
 }
 
 // ---------- agents: drawn from engine events alone, no model calls ----------
-// each subagent lives on a bar as one state strip: the open task bar it was started under,
+// each subagent is kept as a run on a bar (the 详情 cell counts the live ones, the pane lists them): the open task bar it was started under,
 // the bar of its parent agent, or the mod's own "Agents" bar when no task is open.
-// Module maps: a reload forgets running agents, whose strips then stay until the bar is closed.
+// Module maps: a reload forgets running agents, whose runs then stay until the bar is closed.
 const agentHome = new Map<string, string>() // agentId -> bar id
 const toolUses = new Map<string, string>() // tool_use_id -> agentId, to find who waits on a permission
 const waiting = new Set<string>()
-let foldUntil = 0 // keep ticking until finished strips have folded
+let foldUntil = 0 // keep ticking until finished runs have folded
 
-// changes one agent's strip inside the latest list; sounds follow the bar's state
+// changes one agent's run inside the latest list; sounds follow the bar's state
 async function editAgent($: EngineInterface, agentId: string, change: (a: AgentRun) => AgentRun) {
   const home = agentHome.get(agentId)
   if (!home) return
@@ -458,7 +471,7 @@ function registerProgress(on: On, options: Options) {
   // watches the main loop's changing calls: refuses once when multi-step work starts without a bar,
   // and reminds to update the bar when it goes stale mid-turn
   on('tool.call', async ($, e, next) => {
-    // a subagent's call only names its current tool on its strip; no gate, no reminders
+    // a subagent's call only names its current tool on its run; no gate, no reminders
     if (e.agentId) {
       const agentId = e.agentId
       if (!agentHome.has(agentId)) return next(e)
@@ -676,7 +689,7 @@ function registerProgress(on: On, options: Options) {
     return started
   })
 
-  // an agent waiting on a permission prompt turns its strip amber until the call goes on
+  // an agent waiting on a permission prompt turns its run (and the 详情 dot) amber until the call goes on
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
     // the main loop held on a permission prompt: the session waits on the person
@@ -710,7 +723,7 @@ function registerProgress(on: On, options: Options) {
       const isFailed = e.reason !== 'answer'
       const tool = e.reason === 'aborted' ? '已停止' : isFailed ? '失败' : '完成'
       await editAgent($, agentId, a => ({ ...a, state: isFailed ? 'error' : 'done', tool, endedAt: now }))
-      // the mod's own bar sounds through its state; a strip on a task bar sounds here
+      // the mod's own bar sounds through its state; a run on a task bar sounds here
       if (isFailed && agentHome.get(agentId) !== AGENTS) play($, 'error')
       agentHome.delete(agentId)
       waiting.delete(agentId)
@@ -733,8 +746,6 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   const { Box, Text } = t
   const Svg = surface !== 'terminal' && 'Svg' in t ? t.Svg : null
   const maxW = stepsMaxWidth(bodyColumns)
-  await read($, progressTick)
-  const now = await $.clock.now()
   const col = (i: number) => layout[i] ?? COLUMN
   const steps = <Text dimColor>步骤</Text>
   const progress = <Text dimColor>进度</Text>
@@ -748,14 +759,11 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
     ])
   }
 
-  const v = visibleAgents(p, now)
   const w = where(p)
   const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
   const color = STATE_COLOR[p.state]
   const seg = segmentsSvg(p, maxW)
   const alt = `${p.title}: ${segmentsLabel(p)}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
-  const stripsH = v ? stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
-  const stripsW = Math.max(seg.width, 240)
   const bars = Svg ? (
     <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
   ) : (
@@ -782,7 +790,6 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
         slot(t, surface, 'count', col(2), iconOf(t, surface, 'steps', 0, 'off', '步骤'), segmentsCount(p), steps, 'ok'),
         slot(t, surface, 'pct', col(3), iconOf(t, surface, 'ring', pct / 100, pctLevel, '进度'), `${pct}%`, progress, 'ok'),
       ])}
-      {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
     </Box>
   )
 }
@@ -851,7 +858,7 @@ async function bandColumns($: EngineInterface, surface: string, bodyColumns: num
     columnContent(pick(0).map(c => c.value), [...pick(0).map(c => c.label), p ? p.title : '暂无进行中的任务']),
     columnContent(pick(1).map(c => c.value), pick(1).map(c => c.label), [steps]),
     columnContent([...pick(2).map(c => c.value), p ? segmentsCount(p) : '0/0'], [...pick(2).map(c => c.label), '步骤']),
-    columnContent(['100%'], ['进度'], [cells(status), cells('详情 ›')]),
+    columnContent(['100%'], ['进度'], [cells(status), cells(agentsCell(agentRuns(await read($, plans))).label)]),
   ]
   return bandLayout(content, bodyColumns || 80)
 }
