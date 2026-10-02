@@ -60,9 +60,13 @@ for (const surface of SURFACES) {
     expect(band).toBeDefined()
     // a grid: usage row, a hairline, spend row, then the progress row; four equal columns each
     const row = async (key: string) => ((await ui.find({ key }))?.children ?? []) as { props: Record<string, unknown>; children: unknown[] }[]
+    const widths = (await row('row-usage')).map(c => c.props.width)
+    expect(widths).toHaveLength(4)
+    expect(Math.round(widths.reduce((a: number, w) => a + parseFloat(String(w)), 0))).toBe(100)
     for (const key of ['row-usage', 'row-spend', 'bar-none']) {
       const cols = await row(key)
-      expect(cols.map(c => c.props.width)).toEqual(['25%', '25%', '25%', '25%'])
+      // the same columns on every row, so the cells line up
+      expect(cols.map(c => c.props.width)).toEqual(widths)
       expect(cols[3]?.props.justifyContent).toBe('flex-end')
     }
     expect((await ui.find({ key: 'row-usage' }))?.text).toMatch(/空闲$/)

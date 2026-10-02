@@ -7,7 +7,7 @@ import type { EngineInterface, On, Register } from 'claude-code'
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
 import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, visibleAgents, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, shownBar } from './bars'
 import type { Raw, Where } from './bars'
-import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, glyphOf, usageCells, renderTitle } from './figures'
+import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, glyphOf, usageCells, renderTitle, measure, cellWidth, gridColumns } from './figures'
 import type { Cell } from './figures'
 import { DEFAULTS, EMPTY_USAGE, readOptions, THEME } from './state'
 import type { Options, Sound } from './state'
@@ -210,7 +210,7 @@ function registerUsage(on: On, options: Options) {
 
 }
 
-async function drawUsage($: EngineInterface, e: { surface: string; props: { bodyColumns: number } }, opts: Options, elements: ReturnType<EngineInterface['ui']['resolve']>) {
+async function drawUsage($: EngineInterface, e: { surface: string; props: { bodyColumns: number } }, opts: Options, elements: ReturnType<EngineInterface['ui']['resolve']>, cols: string[]) {
   if (await read($, isHidden)) return null
   await read($, tick)
   const u = await read($, usage)
@@ -243,9 +243,9 @@ async function drawUsage($: EngineInterface, e: { surface: string; props: { body
 
   return (
     <Box key="tracking-usage" flexDirection="column" width="100%">
-      {gridRow(elements, 'row-usage', [...top.map(c => cell(c, false)), <Text key="status" color={dotColor}>{`● ${dotLabel}`}</Text>])}
+      {gridRow(elements, 'row-usage', cols, [...top.map(c => cell(c, false)), <Text key="status" color={dotColor}>{`● ${dotLabel}`}</Text>])}
       {hairline(elements, e.surface, e.props.bodyColumns, 'line-usage')}
-      {gridRow(elements, 'row-spend', [...spend.map(c => cell(c, c.key.startsWith('m-'))), detail])}
+      {gridRow(elements, 'row-spend', cols, [...spend.map(c => cell(c, c.key.startsWith('m-'))), detail])}
     </Box>
   )
 }
@@ -627,17 +627,16 @@ function registerProgress(on: On, options: Options) {
 }
 
 // the third row: always there, one bar (the current task), or a dim placeholder before the first one
-async function drawProgress($: EngineInterface, surface: string, bodyColumns: number, t: ReturnType<EngineInterface['ui']['resolve']>) {
+async function drawProgress($: EngineInterface, surface: string, bodyColumns: number, t: ReturnType<EngineInterface['ui']['resolve']>, cols: string[]) {
   const p = shownBar(await read($, plans))
   const { Box, Text } = t
   const Svg = surface !== 'terminal' && 'Svg' in t ? t.Svg : null
-  // desktop reports ~8 CSS px per column; the steps fit their quarter of the band
-  const maxW = Math.max(80, Math.round((bodyColumns || 100) * 8 * 0.25) - 16)
+  const maxW = stepsMaxWidth(bodyColumns)
   await read($, progressTick)
   const now = await $.clock.now()
 
   if (!p) {
-    return gridRow(t, 'bar-none', [<Text key="title" dimColor>○ 暂无进行中的任务</Text>, <Text key="steps" dimColor>—</Text>, <Text key="count" dimColor>0/0</Text>, <Text key="pct" dimColor>0%</Text>])
+    return gridRow(t, 'bar-none', cols, [<Text key="title" dimColor>○ 暂无进行中的任务</Text>, <Text key="steps" dimColor>—</Text>, <Text key="count" dimColor>0/0</Text>, <Text key="pct" dimColor>0%</Text>])
   }
 
   const v = visibleAgents(p, now)
@@ -668,7 +667,7 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
 
   return (
     <Box key={`bar-${p.id}`} flexDirection="column" width="100%">
-      {gridRow(t, `row-${p.id}`, [
+      {gridRow(t, `row-${p.id}`, cols, [
         <Box key="title" flexDirection="row" alignItems="center" gap={1}>
           <Text color={color}>{STATE_GLYPH[p.state]}</Text>
           <Text wrap="truncate">{p.title}</Text>
@@ -684,14 +683,14 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   )
 }
 
-// the band's grid: four equal columns on every row, so the cells line up down the rows;
-// the first three columns start at their left edge, the fourth ends at the band's right edge
-function gridRow(t: ReturnType<EngineInterface['ui']['resolve']>, key: string, cells: JSX.Element[]) {
+// one row of the band's grid: the columns gridColumns sized, shared by every row, so the cells line up down the rows;
+// the first three start at their left edge, the fourth ends at the band's right edge
+function gridRow(t: ReturnType<EngineInterface['ui']['resolve']>, key: string, cols: string[], cells: JSX.Element[]) {
   const { Box } = t
   return (
     <Box key={key} flexDirection="row" alignItems="center" width="100%">
       {cells.map((c, i) => (
-        <Box key={`col-${i}`} width="25%" flexDirection="row" alignItems="center" justifyContent={i === cells.length - 1 ? 'flex-end' : 'flex-start'} paddingRight={i === cells.length - 1 ? 0 : 1}>
+        <Box key={`col-${i}`} width={cols[i] ?? '25%'} flexDirection="row" alignItems="center" justifyContent={i === cells.length - 1 ? 'flex-end' : 'flex-start'} paddingRight={i === cells.length - 1 ? 0 : 1}>
           {c}
         </Box>
       ))}
@@ -721,6 +720,34 @@ function hairline(t: ReturnType<EngineInterface['ui']['resolve']>, surface: stri
   )
 }
 
+// the steps fit about a third of the band; desktop reports ~8 CSS px per column
+function stepsMaxWidth(bodyColumns: number) {
+  return Math.max(80, Math.round((bodyColumns || 100) * 8 * 0.3))
+}
+
+// the grid's columns from what the three rows will show right now
+async function bandColumns($: EngineInterface, surface: string, bodyColumns: number): Promise<string[]> {
+  const isTerminal = surface === 'terminal'
+  const total = isTerminal ? bodyColumns || 80 : (bodyColumns || 100) * 8
+  const u = await read($, usage)
+  const busy = await read($, activity)
+  const { usage: top, spend } = usageCells(u, opts, await $.clock.now())
+  const m = (s: string) => measure(s, isTerminal)
+  const status = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
+  const rows: number[][] = [
+    [...top.map(c => cellWidth(c, false, isTerminal)), m(`● ${status}`)],
+    [...spend.map(c => cellWidth(c, c.key.startsWith('m-'), isTerminal)), m('详情') + (isTerminal ? 0 : 8)],
+  ]
+  const p = shownBar(await read($, plans))
+  if (p) {
+    const steps = isTerminal ? segments(p).reduce((k, st, i) => k + st.length + (i > 0 ? 1 : 0), 0) : segmentsSvg(p, stepsMaxWidth(bodyColumns)).width
+    rows.push([m(`✓ ${p.title}`), steps, m(segmentsLabel(p)), m('100%')])
+  } else {
+    rows.push([m('○ 暂无进行中的任务'), m('—'), m('0/0'), m('0%')])
+  }
+  return gridColumns(rows, total)
+}
+
 // ---------- session title and the band ----------
 
 async function sessionTitleFor($: EngineInterface, opts: Options, cwd: string): Promise<string | undefined> {
@@ -738,8 +765,9 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const t = $.ui.resolve(e)
-    const top = await drawUsage($, e, opts, t)
-    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.surface, e.props.bodyColumns, t)
+    const cols = await bandColumns($, e.surface, e.props.bodyColumns)
+    const top = await drawUsage($, e, opts, t, cols)
+    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.surface, e.props.bodyColumns, t, cols)
     if (!top && !bars) return next(e)
     const { Box } = t
 

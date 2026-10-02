@@ -241,3 +241,34 @@ export function renderTitle(template: string, cwd: string, list: readonly Plan[]
   if (!out) return project
   return out.replace(SEPARATORS, '').slice(0, 80)
 }
+
+// ---------- the band's grid ----------
+
+// how wide a string draws: terminal cells (CJK two), or desktop CSS px at the band's ~13 px font
+export function measure(s: string, isTerminal: boolean): number {
+  return [...s].reduce((w, ch) => {
+    const wide = /[⺀-鿿豈-﫿＀-￯]/.test(ch)
+    if (isTerminal) return w + (wide ? 2 : 1)
+    return w + (wide ? 13 : /[ilI.,:;'|!·]/.test(ch) ? 3.6 : 7.2)
+  }, 0)
+}
+
+// a cell: ring or glyph, the value, the label, with the gaps between them
+export function cellWidth(c: Cell, isModel: boolean, isTerminal: boolean): number {
+  const lead = isModel ? 0 : isTerminal ? 2 : 24
+  return lead + measure(c.value, isTerminal) * (isTerminal ? 1 : 1.05) + (isTerminal ? 1 : 8) + measure(c.label, isTerminal)
+}
+
+// four columns shared by every row, as percentages of the band: each column as wide as its widest cell,
+// and the room left over split evenly into the three gaps, so the cells line up down the rows and sit
+// evenly across them; the last column is only as wide as its content and ends at the right edge.
+export function gridColumns(rows: readonly (readonly number[])[], total: number, n = 4): string[] {
+  const widest = Array.from({ length: n }, (_, i) => Math.min(total * 0.4, Math.max(0, ...rows.map(r => r[i] ?? 0))))
+  const sum = widest.reduce((a, b) => a + b, 0)
+  const slack = total - sum
+  const widths = slack > 0 ? widest.map((w, i) => (i < n - 1 ? w + slack / (n - 1) : w)) : widest.map(w => (w / Math.max(1, sum)) * total)
+  // whole percents: the surfaces take a number or an integer percentage
+  const pct = widths.map(w => Math.max(1, Math.floor((w / total) * 100)))
+  pct[n - 1] = Math.max(1, 100 - pct.slice(0, n - 1).reduce((a, b) => a + b, 0))
+  return pct.map(p => `${p}%`)
+}

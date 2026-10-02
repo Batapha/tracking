@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Plan, Usage } from '../types'
-import { ctxLevel, renderTitle, usageCells } from '../hooks/figures'
+import { ctxLevel, gridColumns, renderTitle, usageCells } from '../hooks/figures'
 import { costOf, modelLabel } from '../hooks/pricing'
 import { shownBar } from '../hooks/bars'
 import { DEFAULTS, EMPTY_USAGE } from '../hooks/state'
@@ -95,4 +95,12 @@ test('the third row shows the latest open task, else the latest bar', () => {
   expect(shownBar([a, b])?.id).toBe('a')
   expect(shownBar([a, b, c])?.id).toBe('c')
   expect(shownBar([b])?.id).toBe('b')
+})
+
+test('grid columns: each as wide as its widest cell, the room left split evenly into the gaps', () => {
+  // band 1000 wide; widest cells 200, 150, 150, 50 → 450 left, 150 per gap
+  const cols = gridColumns([[200, 100, 150, 50], [120, 150, 90, 40]], 1000)
+  expect(cols).toEqual(['35%', '30%', '30%', '5%'])
+  // too wide for the band: shrink in proportion, no gaps
+  expect(gridColumns([[300, 300, 300, 200]], 1000)).toEqual(['27%', '27%', '27%', '19%'])
 })
