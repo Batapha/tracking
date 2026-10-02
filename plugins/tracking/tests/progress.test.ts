@@ -72,7 +72,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(cols).toHaveLength(4)
     const usageCols = ((await ui.find({ key: 'row-usage' }))?.children ?? []) as { props: Record<string, unknown> }[]
     expect(cols.map(c => c.props.width)).toEqual(usageCols.map(c => c.props.width))
-    expect(bar?.text).toContain('实现 · 2/4')
+    expect(bar?.text).toContain('2/4步骤')
+    expect(bar?.text).toContain('50%进度')
     expect(bar?.text).toContain('50%')
     const svg = (await ui.findAll({ type: 'Svg' })).find(x => String(x.props.alt).startsWith('订单模块'))
     if (svg) {

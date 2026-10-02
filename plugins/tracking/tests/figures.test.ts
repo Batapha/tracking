@@ -51,9 +51,13 @@ test('usage cells: ctx and quota windows on one row; cache first, then cost and 
   const { usage, spend } = usageCells(u, DEFAULTS, now)
   expect(usage.map(c => c.key)).toEqual(['ctx', 'rl-five_hour', 'rl-seven_day'])
   expect(usage[1]?.level).toBe('warn')
-  expect(usage[1]?.label).toContain('5h')
+  expect(usage[1]?.label).toContain('5 小时 · 2h 后重置')
+  expect(usage[0]?.label).toContain('上下文 · 距压缩')
   expect(spend.map(c => c.key)).toEqual(['cache', 'cost', 'm-claude-opus-5-5'])
   expect(spend[2]?.label).toContain('+1 个模型')
+  // the model's cost leads, like the session cost beside it
+  expect(spend[2]?.value).toMatch(/^\$/)
+  expect(spend.map(c => c.icon)).toEqual(['clock', 'coin', 'cube'])
   expect(spend[0]?.value).toBe('4:00')
     expect(spend.map(c => c.label).join(' ')).toContain('Opus 5.5')
 

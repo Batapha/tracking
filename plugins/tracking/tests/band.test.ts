@@ -67,10 +67,28 @@ for (const surface of SURFACES) {
       const cols = await row(key)
       // the same columns on every row, so the cells line up
       expect(cols.map(c => c.props.width)).toEqual(widths)
-      expect(cols[3]?.props.justifyContent).toBe('flex-end')
+    }
+    // every cell is icon · value · label; a column's value slot is one width on every row, so the values centre on one line
+    type Node = { key?: string; props: Record<string, unknown>; children: unknown[] }
+    const slotIn = (n: Node, key: string): Node | undefined => {
+      if (n.key === key || n.props.key === key) return n
+      for (const c of n.children ?? []) {
+        if (c && typeof c === 'object' && 'props' in c) {
+          const hit = slotIn(c as Node, key)
+          if (hit) return hit
+        }
+      }
+      return undefined
+    }
+    for (const col of [0, 1, 2, 3]) {
+      const ws = await Promise.all(['row-usage', 'row-spend'].map(async k => slotIn((await row(k))[col] as Node, 'value')?.props.width))
+      expect(ws[0]).toBeGreaterThan(0)
+      expect(ws[1]).toBe(ws[0])
     }
     expect((await ui.find({ key: 'row-usage' }))?.text).toMatch(/空闲$/)
-    expect((await ui.find({ key: 'row-spend' }))?.text).toMatch(/详情$/)
+    expect((await ui.find({ key: 'row-spend' }))?.text).toMatch(/详情 ›$/)
+    // one weight everywhere: nothing bold
+    expect((await ui.findAll({ type: 'Text' })).filter(x => x.props.bold)).toHaveLength(0)
     // and a second hairline above the progress row, each exactly the band's width: never cut short with "…"
     if (surface === 'terminal') {
       const rules = await ui.findAll({ type: 'Text', text: /^─+$/ })
@@ -80,16 +98,16 @@ for (const surface of SURFACES) {
       expect(rules).toHaveLength(2)
       // wider than the band (120 columns ≈ 960 px), clipped by its full-width box
       expect(rules[0]?.props.width).toBeGreaterThan(960)
-      const box = (await ui.findAll({ type: 'Box' })).find(b => b.props.overflow === 'hidden')
-      expect(box?.props.width).toBe('100%')
+      const boxes = (await ui.findAll({ type: 'Box' })).filter(b => b.props.overflow === 'hidden' && b.props.width === '100%')
+      expect(boxes).toHaveLength(2)
     }
 
     const text = band?.text ?? ''
     expect(text).toContain('51%') // ctx
     expect(text).toContain('距压缩')
     expect(text).toContain('42%') // 5h
-    expect(text).toContain('5h')
-    expect(text).toContain('7d')
+    expect(text).toContain('5 小时')
+    expect(text).toContain('7 天')
     expect(text).toContain('5:00') // cache, just written
     expect(text).toContain('$1.23')
     expect(text).toContain('Opus 5.5')

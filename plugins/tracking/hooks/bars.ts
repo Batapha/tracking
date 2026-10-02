@@ -486,7 +486,7 @@ export const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update befor
 export type Segment = 'done' | 'error' | 'todo'
 export const SEGMENT_COLOR: Record<Segment, string> = { done: '#30A46C', error: '#E5484D', todo: '#808080' }
 export const SEG_W = 22
-export const SEG_H = 8
+export const SEG_H = 6
 export const SEG_GAP = 4
 export const STAGE_GAP = 10
 
@@ -525,6 +525,12 @@ export function segmentsLabel(p: Plan): string {
   if (p.state === 'done') return `完成 ${all.length}/${all.length}`
   const stage = p.stages[where(p).stage]?.name ?? ''
   return `${stage ? `${stage} · ` : ''}${done}/${all.length}`
+}
+
+// the steps done out of all, for the third row's count column: "2/4"
+export function segmentsCount(p: Plan): string {
+  const all = segments(p).flat()
+  return `${all.filter(s => s === 'done').length}/${all.length}`
 }
 
 // the one bar the band's third row shows: the latest open task, else the latest agents bar still running, else the latest bar

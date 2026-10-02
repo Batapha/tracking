@@ -5,14 +5,14 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
-import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, visibleAgents, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, shownBar } from './bars'
+import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, visibleAgents, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, segmentsCount, shownBar } from './bars'
 import type { Raw, Where } from './bars'
-import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, glyphOf, usageCells, renderTitle, measure, cellWidth, gridColumns } from './figures'
-import type { Cell } from './figures'
+import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, ICON_CELLS, CELL_PX, glyphOf, usageCells, renderTitle, measure, cellWidth, valueCells, gridColumns } from './figures'
+import type { Cell, Icon } from './figures'
 import { CONTROL, CONTROL_SPEC, readControl, settingRowKey, statusText, settingLine } from './control'
 import type { SettingKey } from './control'
 import { DEFAULTS, EMPTY_USAGE, readOptions, THEME } from './state'
-import type { Options, Sound } from './state'
+import type { Level, Options, Sound } from './state'
 
 // session state the drawings read; declared here so the engine's scan can follow each atom
 const usage = atom({ plugin: 'tracking', key: 'usage' } as const, EMPTY_USAGE)
@@ -245,44 +245,90 @@ function registerUsage(on: On, options: Options) {
 
 }
 
-async function drawUsage($: EngineInterface, e: { surface: string; props: { bodyColumns: number } }, opts: Options, elements: ReturnType<EngineInterface['ui']['resolve']>, cols: string[]) {
+async function drawUsage($: EngineInterface, e: { surface: string; props: { bodyColumns: number } }, opts: Options, t: Elements, layout: Layout) {
   if (await read($, isHidden)) return null
   await read($, tick)
   const u = await read($, usage)
   const busy = await read($, activity)
   const { usage: top, spend } = usageCells(u, opts, await $.clock.now())
-  const { Box, Text, Button } = elements
-  const isTerminal = e.surface === 'terminal'
-  // the terminal's table has Svg but draws it blank: glyphs there
-  const Svg = !isTerminal && 'Svg' in elements ? elements.Svg : null
-
-  const cell = (c: Cell, isModel: boolean) => (
-    <Box key={c.key} flexDirection="row" alignItems="center" gap={1}>
-      {isModel ? null : Svg ? (
-        <Svg source={ringSvg(c.frac, c.level, c.glyph)} alt={`${c.label} ${c.value}`} width={16} height={16} />
-      ) : (
-        <Text color={THEME[c.level]}>{c.glyph === '$' ? '$' : glyphOf(c.frac)}</Text>
-      )}
-      <Text bold={!isModel} color={isModel ? undefined : c.level === 'off' ? undefined : THEME[c.level]} dimColor={c.level === 'off' && !isModel}>
-        {c.value}
-      </Text>
-      <Text dimColor wrap="truncate">
-        {c.label}
-      </Text>
-    </Box>
+  const { Box, Text, Button } = t
+  const draw = (c: Cell, i: number) =>
+    slot(t, e.surface, c.key, layout.valueW[i] ?? 4, iconOf(t, e.surface, c.icon, c.frac, c.level), c.value, <Text dimColor wrap="truncate">{c.label}</Text>, c.level)
+  const statusLevel: Level = busy === 'waiting' ? 'warn' : busy === 'running' ? 'ok' : 'off'
+  const statusLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
+  const status = slot(t, e.surface, 'status', layout.valueW[3] ?? 4, dotOf(t, e.surface, statusLevel), '', <Text dimColor>{statusLabel}</Text>, 'ok')
+  const detail = slot(
+    t,
+    e.surface,
+    'tracking-detail',
+    layout.valueW[3] ?? 4,
+    iconOf(t, e.surface, 'info', 0, 'off'),
+    '',
+    <Button plain dimColor label="详情 ›" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />,
+    'ok',
   )
-  const dotColor = busy === 'waiting' ? THEME.warn : busy === 'running' ? THEME.ok : THEME.off
-  const dotLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
-
-  const detail = <Button key="tracking-detail" plain dimColor label="详情" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />
 
   return (
     <Box key="tracking-usage" flexDirection="column" width="100%">
-      {gridRow(elements, 'row-usage', cols, [...top.map(c => cell(c, false)), <Text key="status" color={dotColor}>{`● ${dotLabel}`}</Text>])}
-      {hairline(elements, e.surface, e.props.bodyColumns, 'line-usage')}
-      {gridRow(elements, 'row-spend', cols, [...spend.map(c => cell(c, c.key.startsWith('m-'))), detail])}
+      {gridRow(t, 'row-usage', layout.cols, [...top.map(draw), status])}
+      {hairline(t, e.surface, e.props.bodyColumns, 'line-usage')}
+      {gridRow(t, 'row-spend', layout.cols, [...spend.map(draw), detail])}
     </Box>
   )
+}
+
+type Elements = ReturnType<EngineInterface['ui']['resolve']>
+// the grid's column widths (integer percents) and each column's value slot (character cells)
+type Layout = { cols: string[]; valueW: number[] }
+
+// one cell's three slots, the same in every column and row: the icon in a fixed slot, the value centred in a slot
+// as wide as the column's widest value, the label centred in the rest; `wide` spans the value and label slots
+function slot(t: Elements, surface: string, key: string, valueW: number, icon: JSX.Element | null, value: string, label: JSX.Element | null, level: Level, wide?: JSX.Element) {
+  const { Box, Text } = t
+  const iconW = surface === 'terminal' ? 2 : ICON_CELLS
+  return (
+    <Box key={key} flexDirection="row" alignItems="center" flexGrow={1}>
+      <Box key="icon" width={iconW} flexShrink={0} flexDirection="row" alignItems="center">
+        {icon}
+      </Box>
+      {wide ? (
+        <Box key="wide" flexGrow={1} flexDirection="row" justifyContent="center" alignItems="center" overflow="hidden">
+          {wide}
+        </Box>
+      ) : null}
+      {wide ? null : (
+        <Box key="value" width={valueW} flexShrink={0} flexDirection="row" justifyContent="center">
+          {value === '' ? null : level === 'warn' || level === 'bad' ? <Text color={THEME[level]}>{value}</Text> : level === 'off' ? <Text dimColor>{value}</Text> : <Text>{value}</Text>}
+        </Box>
+      )}
+      {wide ? null : (
+        <Box key="label" flexGrow={1} flexDirection="row" justifyContent="center" overflow="hidden" paddingLeft={1}>
+          {label}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// a ring that fills in its level's colour, or a plain grey outline; glyphs on the terminal, which draws Svg blank
+function iconOf(t: Elements, surface: string, icon: Icon, frac: number, level: Level): JSX.Element {
+  const { Text } = t
+  if (surface !== 'terminal' && 'Svg' in t) {
+    const { Svg } = t
+    return <Svg source={icon === 'ring' ? ringSvg(frac, level) : iconSvg(icon)} alt="" width={16} height={16} />
+  }
+  if (icon === 'ring') return <Text color={THEME[level]}>{glyphOf(frac)}</Text>
+  return <Text dimColor>{ICON_GLYPH[icon]}</Text>
+}
+
+// the session's state: a small dot, grey when idle, green while running, yellow while it waits on you
+function dotOf(t: Elements, surface: string, level: Level): JSX.Element {
+  const { Text } = t
+  if (surface !== 'terminal' && 'Svg' in t) {
+    const { Svg } = t
+    return <Svg source={dotSvg(level)} alt="" width={16} height={16} />
+  }
+  return <Text color={THEME[level]}>•</Text>
 }
 
 // ---------- progress bars ----------
@@ -662,31 +708,39 @@ function registerProgress(on: On, options: Options) {
 }
 
 // the third row: always there, one bar (the current task), or a dim placeholder before the first one
-async function drawProgress($: EngineInterface, surface: string, bodyColumns: number, t: ReturnType<EngineInterface['ui']['resolve']>, cols: string[]) {
+async function drawProgress($: EngineInterface, surface: string, bodyColumns: number, t: Elements, layout: Layout) {
   const p = shownBar(await read($, plans))
   const { Box, Text } = t
   const Svg = surface !== 'terminal' && 'Svg' in t ? t.Svg : null
   const maxW = stepsMaxWidth(bodyColumns)
   await read($, progressTick)
   const now = await $.clock.now()
+  const w3 = layout.valueW[2] ?? 4
+  const w4 = layout.valueW[3] ?? 4
+  const steps = <Text dimColor>步骤</Text>
+  const progress = <Text dimColor>进度</Text>
 
   if (!p) {
-    return gridRow(t, 'bar-none', cols, [<Text key="title" dimColor>○ 暂无进行中的任务</Text>, <Text key="steps" dimColor>—</Text>, <Text key="count" dimColor>0/0</Text>, <Text key="pct" dimColor>0%</Text>])
+    return gridRow(t, 'bar-none', layout.cols, [
+      slot(t, surface, 'title', 0, <Text dimColor>○</Text>, '', null, 'off', <Text dimColor wrap="truncate">暂无进行中的任务</Text>),
+      slot(t, surface, 'steps', 0, null, '', null, 'off', <Text dimColor>—</Text>),
+      slot(t, surface, 'count', w3, iconOf(t, surface, 'steps', 0, 'off'), '0/0', steps, 'off'),
+      slot(t, surface, 'pct', w4, iconOf(t, surface, 'ring', 0, 'off'), '0%', progress, 'off'),
+    ])
   }
 
   const v = visibleAgents(p, now)
   const w = where(p)
   const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
   const color = STATE_COLOR[p.state]
-  const label = segmentsLabel(p)
   const seg = segmentsSvg(p, maxW)
-  const alt = `${p.title}: ${label}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
+  const alt = `${p.title}: ${segmentsLabel(p)}, ${pct}%${p.note ? ` — ${p.note}` : ''}`
   const stripsH = v ? stripsHeight(v.shown.length + (v.hidden.length > 0 ? 1 : 0)) : 0
   const stripsW = Math.max(seg.width, 240)
-  const steps = Svg ? (
-    <Svg key="steps" source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
+  const bars = Svg ? (
+    <Svg source={seg.source} alt={alt} width={seg.width} height={SEG_H} />
   ) : (
-    <Text key="steps">
+    <Text>
       {segments(p).map((stage, i) => (
         <Text key={`stage-${i}`}>
           {i > 0 ? ' ' : ''}
@@ -699,19 +753,15 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
       ))}
     </Text>
   )
+  const pctLevel: Level = p.state === 'error' ? 'bad' : p.state === 'needs_input' ? 'warn' : 'ok'
 
   return (
     <Box key={`bar-${p.id}`} flexDirection="column" width="100%">
-      {gridRow(t, `row-${p.id}`, cols, [
-        <Box key="title" flexDirection="row" alignItems="center" gap={1}>
-          <Text color={color}>{STATE_GLYPH[p.state]}</Text>
-          <Text wrap="truncate">{p.title}</Text>
-        </Box>,
-        steps,
-        <Text key="count" color={p.state === 'done' ? THEME.ok : color} wrap="truncate">
-          {label}
-        </Text>,
-        <Text key="pct" dimColor>{`${pct}%`}</Text>,
+      {gridRow(t, `row-${p.id}`, layout.cols, [
+        slot(t, surface, 'title', 0, <Text color={color}>{STATE_GLYPH[p.state]}</Text>, '', null, 'ok', <Text wrap="truncate">{p.title}</Text>),
+        slot(t, surface, 'steps', 0, null, '', null, 'ok', bars),
+        slot(t, surface, 'count', w3, iconOf(t, surface, 'steps', 0, 'off'), segmentsCount(p), steps, 'ok'),
+        slot(t, surface, 'pct', w4, iconOf(t, surface, 'ring', pct / 100, pctLevel), `${pct}%`, progress, 'ok'),
       ])}
       {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
     </Box>
@@ -719,14 +769,21 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
 }
 
 // one row of the band's grid: the columns gridColumns sized, shared by every row, so the cells line up down the rows;
-// the first three start at their left edge, the fourth ends at the band's right edge
-function gridRow(t: ReturnType<EngineInterface['ui']['resolve']>, key: string, cols: string[], cells: JSX.Element[]) {
-  const { Box } = t
+// a thin vertical rule between columns
+function gridRow(t: Elements, key: string, cols: string[], cells: JSX.Element[]) {
+  const { Box, Text } = t
   return (
     <Box key={key} flexDirection="row" alignItems="center" width="100%">
       {cells.map((c, i) => (
-        <Box key={`col-${i}`} width={cols[i] ?? '25%'} flexDirection="row" alignItems="center" justifyContent={i === cells.length - 1 ? 'flex-end' : 'flex-start'} paddingRight={i === cells.length - 1 ? 0 : 1}>
-          {c}
+        <Box key={`col-${i}`} width={cols[i] ?? '25%'} flexDirection="row" alignItems="center">
+          {i > 0 ? (
+            <Text key="rule" dimColor>
+              │
+            </Text>
+          ) : null}
+          <Box key="cell" flexGrow={1} flexDirection="row" alignItems="center" paddingLeft={i > 0 ? 1 : 0} paddingRight={i < cells.length - 1 ? 1 : 0}>
+            {c}
+          </Box>
         </Box>
       ))}
     </Box>
@@ -760,27 +817,31 @@ function stepsMaxWidth(bodyColumns: number) {
   return Math.max(80, Math.round((bodyColumns || 100) * 8 * 0.3))
 }
 
-// the grid's columns from what the three rows will show right now
-async function bandColumns($: EngineInterface, surface: string, bodyColumns: number): Promise<string[]> {
+// the grid's columns from what the three rows will show right now, and each column's value slot
+async function bandColumns($: EngineInterface, surface: string, bodyColumns: number): Promise<Layout> {
   const isTerminal = surface === 'terminal'
-  const total = isTerminal ? bodyColumns || 80 : (bodyColumns || 100) * 8
+  const unit = isTerminal ? 1 : CELL_PX
+  const total = (bodyColumns || (isTerminal ? 80 : 100)) * unit
   const u = await read($, usage)
   const busy = await read($, activity)
   const { usage: top, spend } = usageCells(u, opts, await $.clock.now())
-  const m = (s: string) => measure(s, isTerminal)
-  const status = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
-  const rows: number[][] = [
-    [...top.map(c => cellWidth(c, false, isTerminal)), m(`● ${status}`)],
-    [...spend.map(c => cellWidth(c, c.key.startsWith('m-'), isTerminal)), m('详情') + (isTerminal ? 0 : 8)],
-  ]
   const p = shownBar(await read($, plans))
+  const count = p ? segmentsCount(p) : '0/0'
+  const valueW = [0, 1, 2].map(i => valueCells([top[i]?.value ?? '', spend[i]?.value ?? '', ...(i === 2 ? [count] : [])]))
+  valueW.push(valueCells(['100%']))
+  const status = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
+  const wide = (s: number) => (ICON_CELLS + 3) * unit + s
+  const rows: number[][] = [
+    [...top.map((c, i) => cellWidth(valueW[i] ?? 4, c.label, isTerminal)), cellWidth(valueW[3] ?? 4, status, isTerminal)],
+    [...spend.map((c, i) => cellWidth(valueW[i] ?? 4, c.label, isTerminal)), cellWidth(valueW[3] ?? 4, '详情 ›', isTerminal)],
+  ]
   if (p) {
     const steps = isTerminal ? segments(p).reduce((k, st, i) => k + st.length + (i > 0 ? 1 : 0), 0) : segmentsSvg(p, stepsMaxWidth(bodyColumns)).width
-    rows.push([m(`✓ ${p.title}`), steps, m(segmentsLabel(p)), m('100%')])
+    rows.push([wide(measure(p.title, isTerminal)), wide(steps), cellWidth(valueW[2] ?? 4, '步骤', isTerminal), cellWidth(valueW[3] ?? 4, '进度', isTerminal)])
   } else {
-    rows.push([m('○ 暂无进行中的任务'), m('—'), m('0/0'), m('0%')])
+    rows.push([wide(measure('暂无进行中的任务', isTerminal)), wide(unit), cellWidth(valueW[2] ?? 4, '步骤', isTerminal), cellWidth(valueW[3] ?? 4, '进度', isTerminal)])
   }
-  return gridColumns(rows, total)
+  return { cols: gridColumns(rows, total), valueW }
 }
 
 // ---------- session title and the band ----------
@@ -800,9 +861,9 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const t = $.ui.resolve(e)
-    const cols = await bandColumns($, e.surface, e.props.bodyColumns)
-    const top = await drawUsage($, e, opts, t, cols)
-    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.surface, e.props.bodyColumns, t, cols)
+    const layout = await bandColumns($, e.surface, e.props.bodyColumns)
+    const top = await drawUsage($, e, opts, t, layout)
+    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.surface, e.props.bodyColumns, t, layout)
     if (!top && !bars) return next(e)
     const { Box } = t
 

@@ -64,9 +64,9 @@ export function fmtClock(ms: number): string {
 }
 
 export function windowLabel(kind: string): string {
-  if (kind === 'five_hour') return '5h'
-  if (kind === 'seven_day') return '7d'
-  if (kind.startsWith('seven_day_')) return `7d ${kind.slice(10)}`
+  if (kind === 'five_hour') return '5 小时'
+  if (kind === 'seven_day') return '7 天'
+  if (kind.startsWith('seven_day_')) return `7 天 ${kind.slice(10)}`
   if (kind === 'spend_limit') return '额度'
   return kind
 }
@@ -140,23 +140,35 @@ export function detailMarkdown(u: Usage, now: number): string {
 }
 
 // one ring like the built-in usage meter: a grey track and the used share in its level's colour
-export function ringSvg(frac: number, level: Level, glyph?: '$' | 'clock'): string {
-  const c = 2 * Math.PI * 6.5
+export function ringSvg(frac: number, level: Level): string {
+  const c = 2 * Math.PI * 6
   const len = Math.max(0, Math.min(1, frac)) * c
-  const color = HEX[level]
-  const inner =
-    glyph === '$'
-      ? `<text x="8" y="11.4" text-anchor="middle" font-size="9" font-weight="700" font-family="ui-sans-serif,system-ui,-apple-system,sans-serif" fill="${color}">$</text>`
-      : glyph === 'clock'
-        ? `<path d="M8 4.8V8l2 1.3" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/>`
-        : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#808080" stroke-opacity=".3" stroke-width="2"/><circle cx="8" cy="8" r="6.5" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 8 8)"/>${inner}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="#808080" stroke-opacity=".3" stroke-width="2"/><circle cx="8" cy="8" r="6" fill="none" stroke="${HEX[level]}" stroke-width="2" stroke-linecap="round" stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 8 8)"/></svg>`
+}
+
+// every cell leads with one icon in a fixed slot: a ring that fills, or a plain grey outline
+export type Icon = 'ring' | 'clock' | 'coin' | 'cube' | 'info' | 'steps'
+const OUTLINE: Record<Exclude<Icon, 'ring'>, string> = {
+  clock: '<circle cx="8" cy="8.6" r="5.6"/><path d="M8 5.8v3l2 1.3M6.3 2.2h3.4"/>',
+  coin: '<circle cx="8" cy="8" r="6.2"/><path d="M10 6c-.4-.7-1.1-.9-2-.9-1.1 0-1.9.6-1.9 1.4 0 2 4 1 4 3 0 .9-.9 1.5-2.1 1.5-.9 0-1.7-.3-2.1-1M8 4v1.1M8 10.9V12"/>',
+  cube: '<path d="M8 1.8 13.6 5v6L8 14.2 2.4 11V5z"/>',
+  info: '<circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v4M8 4.8v.1"/>',
+  steps: '<path d="M2.4 12.6h3.4V9.2h3.4V5.8h4.4"/>',
+}
+export function iconSvg(icon: Exclude<Icon, 'ring'>): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A8984" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${OUTLINE[icon]}</svg>`
+}
+// the terminal draws no Svg: one narrow glyph per icon
+export const ICON_GLYPH: Record<Exclude<Icon, 'ring'>, string> = { clock: '◷', coin: '$', cube: '◆', info: '≡', steps: '▸' }
+export function dotSvg(level: Level): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="${HEX[level]}"/></svg>`
 }
 
 export const GLYPHS = ['○', '◔', '◑', '◕', '●']
 export const glyphOf = (frac: number) => GLYPHS[Math.max(0, Math.min(4, Math.round(frac * 4)))] ?? '○'
 
-export type Cell = { key: string; frac: number; level: Level; value: string; label: string; glyph?: '$' | 'clock' }
+// one grid cell: icon, then the value (white, or yellow / red at a warning), then the grey label
+export type Cell = { key: string; icon: Icon; frac: number; level: Level; value: string; label: string }
 
 export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[]; spend: Cell[] } {
   const usage: Cell[] = []
@@ -164,20 +176,21 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
   const left = untilCompact(u)
   usage.push({
     key: 'ctx',
+    icon: 'ring',
     frac: (pct ?? 0) / 100,
     level: ctxLevel(u),
     value: pct === null ? '—' : `${pct}%`,
-    label: left === null ? 'ctx' : `ctx · 距压缩 ${left}%`,
+    label: left === null ? '上下文' : `上下文 · 距压缩 ${left}%`,
   })
   // always the 5h and weekly columns, so the grid keeps its shape; a window not reported reads "—"
   for (const kind of ['five_hour', 'seven_day']) {
     const w = opts.showRateLimits ? u.rateLimits.find(r => r.kind === kind) : undefined
     if (!w) {
-      usage.push({ key: `rl-${kind}`, frac: 0, level: 'off', value: '—', label: windowLabel(kind) })
+      usage.push({ key: `rl-${kind}`, icon: 'ring', frac: 0, level: 'off', value: '—', label: windowLabel(kind) })
       continue
     }
-    const reset = w.resetsAt ? ` · ${fmtSpan(Date.parse(w.resetsAt) - now)}后重置` : ''
-    usage.push({ key: `rl-${kind}`, frac: w.percentUsed / 100, level: quotaLevel(w.percentUsed), value: `${Math.round(w.percentUsed)}%`, label: `${windowLabel(kind)}${reset}` })
+    const reset = w.resetsAt ? ` · ${fmtSpan(Date.parse(w.resetsAt) - now)} 后重置` : ''
+    usage.push({ key: `rl-${kind}`, icon: 'ring', frac: w.percentUsed / 100, level: quotaLevel(w.percentUsed), value: `${Math.round(w.percentUsed)}%`, label: `${windowLabel(kind)}${reset}` })
   }
 
   const spend: Cell[] = []
@@ -187,23 +200,31 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
   const cache = cacheLeftMs(u, now)
   const ttlLabel = `${u.isTtlKnown ? '' : '≈'}${u.cacheTtlMs >= 3_600_000 ? '1h' : '5m'}`
   if (cache === null) {
-    spend.push({ key: 'cache', frac: 0, level: 'off', value: '—', label: `缓存 ${ttlLabel}`, glyph: 'clock' })
+    spend.push({ key: 'cache', icon: 'clock', frac: 0, level: 'off', value: '—', label: `缓存 · ${ttlLabel}` })
   } else if (cache > 0) {
-    spend.push({ key: 'cache', frac: cache / u.cacheTtlMs, level: cache <= 60_000 ? 'warn' : 'ok', value: fmtClock(cache), label: `缓存 ${ttlLabel}`, glyph: 'clock' })
+    spend.push({ key: 'cache', icon: 'clock', frac: cache / u.cacheTtlMs, level: cache <= 60_000 ? 'warn' : 'ok', value: fmtClock(cache), label: `缓存 · ${ttlLabel}` })
   } else {
     const cost = u.model && u.ctxTokens ? recacheCost(u.model, u.ctxTokens, u.cacheTtlMs) : null
-    spend.push({ key: 'cache', frac: 0, level: 'off', value: '已失效', label: cost === null ? '缓存' : `缓存 · 下条约多 ${fmtUsd(cost)}`, glyph: 'clock' })
+    spend.push({ key: 'cache', icon: 'clock', frac: 0, level: 'bad', value: '已失效', label: cost === null ? '缓存' : `缓存 · 下条约多 ${fmtUsd(cost)}` })
   }
-  spend.push({ key: 'cost', frac: 1, level: 'ok', value: total === null ? '$—' : fmtUsd(total), label: '本会话', glyph: '$' })
+  spend.push({ key: 'cost', icon: 'coin', frac: 1, level: 'ok', value: total === null ? '$—' : fmtUsd(total), label: '本会话' })
   // one column for the models: the largest, and how many more the details list
   const [first] = rows
   if (first) {
     const [model, t] = first
     const cost = costOf(model, t, u.cacheTtlMs)
     const more = rows.length > 1 ? ` · +${rows.length - 1} 个模型` : ''
-    spend.push({ key: `m-${model}`, frac: 0, level: 'off', value: fmtTokens(sum(t)), label: `${modelLabel(model)}${cost === null ? '' : ` · ${fmtUsd(cost)}`}${more}` })
+    // the cost first, like the session's cell beside it; the tokens go in the label
+    spend.push({
+      key: `m-${model}`,
+      icon: 'cube',
+      frac: 0,
+      level: 'ok',
+      value: cost === null ? fmtTokens(sum(t)) : fmtUsd(cost),
+      label: `${modelLabel(model)}${cost === null ? '' : ` · ${fmtTokens(sum(t))}`}${more}`,
+    })
   } else {
-    spend.push({ key: 'm-none', frac: 0, level: 'off', value: '—', label: '模型' })
+    spend.push({ key: 'm-none', icon: 'cube', frac: 0, level: 'off', value: '—', label: '模型' })
   }
   return { usage, spend }
 }
@@ -253,10 +274,17 @@ export function measure(s: string, isTerminal: boolean): number {
   }, 0)
 }
 
-// a cell: ring or glyph, the value, the label, with the gaps between them
-export function cellWidth(c: Cell, isModel: boolean, isTerminal: boolean): number {
-  const lead = isModel ? 0 : isTerminal ? 2 : 24
-  return lead + measure(c.value, isTerminal) * (isTerminal ? 1 : 1.05) + (isTerminal ? 1 : 8) + measure(c.label, isTerminal)
+// a cell's three slots: the icon (fixed), the value (fixed per column, centred), the label (the rest, centred).
+// Slot widths are in character cells, which the surfaces lay out in; desktop draws a cell about 8 CSS px wide.
+export const ICON_CELLS = 3
+export const CELL_PX = 8
+export function valueCells(values: readonly string[]): number {
+  return Math.max(3, ...values.map(v => Math.ceil(measure(v, true)))) + 1
+}
+// how wide a cell is in the grid's unit (terminal cells, desktop px), with the divider and padding around it
+export function cellWidth(valueW: number, label: string, isTerminal: boolean): number {
+  const unit = isTerminal ? 1 : CELL_PX
+  return (ICON_CELLS + valueW + 4) * unit + measure(label, isTerminal)
 }
 
 // four columns shared by every row, as percentages of the band: each column as wide as its widest cell,
