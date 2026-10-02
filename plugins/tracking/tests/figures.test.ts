@@ -113,12 +113,14 @@ test('band layout: each group as wide as its widest value and label, the room le
     120,
   )
   expect(layout.map(c => c.width)).toEqual(['27%', '31%', '26%', '16%'])
-  expect(layout[0]).toMatchObject({ group: '92%', icon: '7%', value: '15%' })
+  expect(layout[0]).toMatchObject({ group: '88%', icon: '7%', value: '15%' })
+  // never edge to edge: room on both sides of every group
+  for (const c of layout) expect(parseInt(c.group)).toBeLessThanOrEqual(88)
   for (const c of layout) for (const v of [c.width, c.group, c.icon, c.value]) expect(v).toMatch(/^\d+%$/)
   // too wide for the band: columns shrink in proportion and a group never exceeds its column
   const tight = bandLayout([{ value: 6, label: 40, wide: 0 }, { value: 6, label: 40, wide: 0 }, { value: 6, label: 40, wide: 0 }, { value: 5, label: 4, wide: 6 }], 80)
   expect(tight.reduce((a, c) => a + parseInt(c.width), 0)).toBe(100)
-  for (const c of tight) expect(parseInt(c.group)).toBeLessThanOrEqual(100)
+  for (const c of tight) expect(parseInt(c.group)).toBeLessThanOrEqual(88)
   // cells count CJK as two
   expect(columnContent(['$2.41'], ['Opus 5.5 · 3.8M', '本会话'])).toEqual({ value: 6, label: 15, wide: 0 })
 })

@@ -287,6 +287,7 @@ export type ColumnLayout = { width: string; group: string; icon: string; value: 
 export const ICON_CELLS = 2 // the icon and the gap after it
 const GAP = 1 // between the value and the label
 const RULE = 3 // the vertical rule and the padding either side
+const GROUP_MAX = 88 // percent of its column a group may take
 
 export const cells = (s: string) => Math.ceil(measure(s, true))
 
@@ -310,9 +311,11 @@ export function bandLayout(content: readonly ColumnContent[], total: number): Co
   const pct = widths.map(w => Math.max(1, Math.floor((w / total) * 100)))
   pct[pct.length - 1] = Math.max(1, 100 - pct.slice(0, -1).reduce((a, b) => a + b, 0))
   const share = (part: number, whole: number) => `${Math.max(1, Math.min(100, Math.round((part / Math.max(1, whole)) * 100)))}%`
+  // a group never fills its column: at least 6% clear on each side, so the icon keeps off the rule before it
   return content.map((c, i) => {
     const g = groups[i] ?? 1
     const column = ((pct[i] ?? 25) / 100) * total - RULE
-    return { width: `${pct[i]}%`, group: share(g, column), icon: share(ICON_CELLS, g), value: share(c.value, g) }
+    const group = `${Math.min(GROUP_MAX, parseInt(share(g, column)))}%`
+    return { width: `${pct[i]}%`, group, icon: share(ICON_CELLS, g), value: share(c.value, g) }
   })
 }
