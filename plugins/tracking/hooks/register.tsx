@@ -130,6 +130,23 @@ async function usageSessionStart($: EngineInterface) {
     if ((left !== null && left > -2000) || slowTick === 0) await update($, tick, n => n + 1)
   })
 }
+// the TTL is read off the transcript at the end of each turn; until it is known, also shortly after each
+// main-thread response, so a long first turn does not count down (and price) a 1h cache as 5m
+let transcriptPath: string | undefined
+let lastTtlTry = 0
+async function detectTtlEarly($: EngineInterface) {
+  if (opts.cacheTtl !== 'auto' || !transcriptPath) return
+  const now = await $.clock.now()
+  if (now - lastTtlTry < 5000) return
+  lastTtlTry = now
+  // give the transcript a moment to get the response's row
+  $.clock.after(1000, async () => {
+    if ((await read($, usage)).isTtlKnown) return
+    const ttl = await detectTtl($, transcriptPath)
+    if (ttl !== null) await update($, usage, u => (u.isTtlKnown ? u : { ...u, cacheTtlMs: ttl, isTtlKnown: true }))
+  })
+}
+
 async function usageStop($: EngineInterface, transcriptPath: string | undefined) {
   if (opts.cacheTtl === 'auto') {
     const ttl = await detectTtl($, transcriptPath)
@@ -176,6 +193,7 @@ function registerUsage(on: On, options: Options) {
       }
     })
     if (!e.agentId && u.compactAt === null) void refreshCompactAt($)
+    if (!e.agentId && !u.isTtlKnown) void detectTtlEarly($)
     await persist($, u)
     return result
   })
@@ -896,12 +914,14 @@ export const register: Register = (on, options) => {
   })
 
   on('classic.SessionStart', async ($, e, next) => {
+    transcriptPath = e.transcript_path ?? transcriptPath
     const result = await next(e)
     const sessionTitle = await sessionTitleFor($, opts, e.cwd)
     return sessionTitle && !result.sessionTitle ? { ...result, sessionTitle } : result
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
+    transcriptPath = e.transcript_path ?? transcriptPath
     const result = await next(e)
     const sessionTitle = await sessionTitleFor($, opts, e.cwd)
     return sessionTitle && !result.sessionTitle ? { ...result, sessionTitle } : result

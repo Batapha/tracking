@@ -80,6 +80,17 @@ export const add = (a: ModelTokens | undefined, input: number, output: number, c
 })
 
 
+// the session's total: the host's /cost figure, or what the per-response ledger adds up to when that is more.
+// The host reports its figure once per turn, so mid-turn it lags the responses the ledger has already counted.
+export function sessionTotal(u: Usage): { total: number | null; priced: number } {
+  const priced = Object.entries(u.models)
+    .map(([m, t]) => costOf(m, t, u.cacheTtlMs) ?? 0)
+    .reduce((a, b) => a + b, 0)
+  const hasModels = Object.keys(u.models).length > 0
+  if (u.costUsd === null) return { total: hasModels ? priced : null, priced }
+  return { total: Math.max(u.costUsd, priced), priced }
+}
+
 // ---------- drawing ----------
 
 // ---------- subagents ----------
@@ -156,9 +167,11 @@ export function detailMarkdown(u: Usage, now: number, runs: AgentRun[] = []): st
       lines.push(`| ${modelLabel(model)} | ${fmtTokens(t.input)} | ${fmtTokens(t.output)} | ${fmtTokens(t.cacheRead)} | ${fmtTokens(t.cacheWrite)} | ${fmtTokens(sum(t))} | ${cost === null ? '—' : fmtUsd(cost)} |`)
     }
   }
-  if (u.costUsd !== null) {
+  const { total } = sessionTotal(u)
+  if (total !== null) {
     lines.push('')
-    lines.push(`本会话总额 ${fmtUsd(u.costUsd)}（与 /cost 一致）。`)
+    const host = u.costUsd !== null && fmtUsd(u.costUsd) !== fmtUsd(total) ? `；/cost 上次报 ${fmtUsd(u.costUsd)}，会在本轮结束时追上` : ''
+    lines.push(`本会话总额 ${fmtUsd(total)}（按 API 标价${host}）。`)
   }
   if (!isAgentsFirst) lines.push(...agents)
   if (u.rateLimits.length > 0) {
@@ -234,8 +247,7 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
 
   const spend: Cell[] = []
   const rows = Object.entries(u.models).sort((a, b) => sum(b[1]) - sum(a[1]))
-  const priced = rows.map(([m, t]) => costOf(m, t, u.cacheTtlMs) ?? 0).reduce((a, b) => a + b, 0)
-  const total = u.costUsd ?? (rows.length ? priced : null)
+  const { total } = sessionTotal(u)
   const cache = cacheLeftMs(u, now)
   const ttlLabel = `${u.isTtlKnown ? '' : '≈'}${u.cacheTtlMs >= 3_600_000 ? '1h' : '5m'}`
   if (cache === null) {

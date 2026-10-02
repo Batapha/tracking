@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { AgentRun, Plan, Usage } from '../types'
-import { agentRuns, agentsCell, bandLayout, columnContent, ctxLevel, detailMarkdown, renderTitle, usageCells } from '../hooks/figures'
+import { agentRuns, agentsCell, sessionTotal, bandLayout, columnContent, ctxLevel, detailMarkdown, renderTitle, usageCells } from '../hooks/figures'
 import { costOf, modelLabel } from '../hooks/pricing'
 import { shownBar } from '../hooks/bars'
 import { DEFAULTS, EMPTY_USAGE } from '../hooks/state'
@@ -137,4 +137,16 @@ test('running subagents turn the 详情 cell into a count and lead the detail pa
   expect(md.startsWith('**子代理**（1 个在运行）')).toBe(true)
   expect(md).toContain('| 第1轮独立复核 | 运行中 | Read | 2m 14s |')
   expect(md).toContain('| 旧的 | 完成 | — | 30s |')
+})
+
+test('the session total never lags the per-response ledger', () => {
+  const models = { 'claude-opus-5-5': { input: 0, output: 100_000, cacheRead: 0, cacheWrite: 0 } }
+  const ledger = sessionTotal({ ...EMPTY_USAGE, models }).priced
+  expect(ledger).toBeGreaterThan(1)
+  // /cost reported after the first response only: the ledger wins
+  expect(sessionTotal({ ...EMPTY_USAGE, models, costUsd: 0.31 }).total).toBe(ledger)
+  // /cost knows of more than the ledger saw: /cost wins
+  expect(sessionTotal({ ...EMPTY_USAGE, models, costUsd: 99 }).total).toBe(99)
+  expect(sessionTotal({ ...EMPTY_USAGE }).total).toBe(null)
+  expect(usageCells({ ...EMPTY_USAGE, models, costUsd: 0.31 }, DEFAULTS, 0).spend.find(c => c.key === 'cost')?.value).not.toBe('$0.31')
 })
