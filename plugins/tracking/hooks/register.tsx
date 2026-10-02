@@ -7,8 +7,8 @@ import type { EngineInterface, On, Register } from 'claude-code'
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
 import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, visibleAgents, stripsHeight, stripsSvg, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, segmentsCount, shownBar } from './bars'
 import type { Raw, Where } from './bars'
-import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, ICON_CELLS, CELL_PX, glyphOf, usageCells, renderTitle, measure, cellWidth, valueCells, gridColumns } from './figures'
-import type { Cell, Icon } from './figures'
+import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, glyphOf, usageCells, renderTitle, cells, columnContent, bandLayout } from './figures'
+import type { Cell, ColumnLayout, Icon } from './figures'
 import { CONTROL, CONTROL_SPEC, readControl, settingRowKey, statusText, settingLine } from './control'
 import type { SettingKey } from './control'
 import { DEFAULTS, EMPTY_USAGE, readOptions, THEME } from './state'
@@ -252,57 +252,60 @@ async function drawUsage($: EngineInterface, e: { surface: string; props: { body
   const busy = await read($, activity)
   const { usage: top, spend } = usageCells(u, opts, await $.clock.now())
   const { Box, Text, Button } = t
-  const draw = (c: Cell, i: number) =>
-    slot(t, e.surface, c.key, layout.valueW[i] ?? 4, iconOf(t, e.surface, c.icon, c.frac, c.level), c.value, <Text dimColor wrap="truncate">{c.label}</Text>, c.level)
+  const col = (i: number) => layout[i] ?? COLUMN
+  const draw = (c: Cell, i: number) => slot(t, e.surface, c.key, col(i), iconOf(t, e.surface, c.icon, c.frac, c.level, c.label), c.value, <Text dimColor wrap="truncate">{c.label}</Text>, c.level)
   const statusLevel: Level = busy === 'waiting' ? 'warn' : busy === 'running' ? 'ok' : 'off'
   const statusLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
-  const status = slot(t, e.surface, 'status', layout.valueW[3] ?? 4, dotOf(t, e.surface, statusLevel), '', <Text dimColor>{statusLabel}</Text>, 'ok')
+  const status = slot(t, e.surface, 'status', col(3), dotOf(t, e.surface, statusLevel, statusLabel), '', null, 'ok', <Text dimColor>{statusLabel}</Text>)
   const detail = slot(
     t,
     e.surface,
     'tracking-detail',
-    layout.valueW[3] ?? 4,
-    iconOf(t, e.surface, 'info', 0, 'off'),
+    col(3),
+    iconOf(t, e.surface, 'info', 0, 'off', '详情'),
     '',
-    <Button plain dimColor label="详情 ›" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />,
+    null,
     'ok',
+    <Button plain dimColor label="详情 ›" onPress={() => $.ui.open({ id: DETAIL_PANE, title: 'Tracking 详情' })} />,
   )
 
   return (
     <Box key="tracking-usage" flexDirection="column" width="100%">
-      {gridRow(t, 'row-usage', layout.cols, [...top.map(draw), status])}
+      {gridRow(t, 'row-usage', layout, [...top.map(draw), status])}
       {hairline(t, e.surface, e.props.bodyColumns, 'line-usage')}
-      {gridRow(t, 'row-spend', layout.cols, [...spend.map(draw), detail])}
+      {gridRow(t, 'row-spend', layout, [...spend.map(draw), detail])}
     </Box>
   )
 }
 
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
-// the grid's column widths (integer percents) and each column's value slot (character cells)
-type Layout = { cols: string[]; valueW: number[] }
+// the four columns: each one's share of the band and how its group divides
+type Layout = ColumnLayout[]
+const COLUMN: ColumnLayout = { width: '25%', group: '100%', icon: '15%', value: '30%' }
 
-// one cell's three slots, the same in every column and row: the icon in a fixed slot, the value centred in a slot
-// as wide as the column's widest value, the label centred in the rest; `wide` spans the value and label slots
-function slot(t: Elements, surface: string, key: string, valueW: number, icon: JSX.Element | null, value: string, label: JSX.Element | null, level: Level, wide?: JSX.Element) {
+// one cell, the same in every column and row: the icon, the value centred in a slot as wide as the column's widest value,
+// the label centred in a slot as wide as its widest label. The three together are one group, centred in the column;
+// `wide` spans the value and label slots (a task title, the step bars, a cell with no value)
+function slot(t: Elements, surface: string, key: string, col: ColumnLayout, icon: JSX.Element | null, value: string, label: JSX.Element | null, level: Level, wide?: JSX.Element) {
   const { Box, Text } = t
-  const iconW = surface === 'terminal' ? 2 : ICON_CELLS
+  const valueText = level === 'warn' || level === 'bad' ? <Text color={THEME[level]}>{value}</Text> : level === 'off' ? <Text dimColor>{value}</Text> : <Text>{value}</Text>
   return (
-    <Box key={key} flexDirection="row" alignItems="center" flexGrow={1}>
-      <Box key="icon" width={iconW} flexShrink={0} flexDirection="row" alignItems="center">
+    <Box key={key} width={col.group} flexDirection="row" alignItems="center">
+      <Box key="icon" width={col.icon} flexShrink={0} flexDirection="row" alignItems="center">
         {icon}
       </Box>
       {wide ? (
-        <Box key="wide" flexGrow={1} flexDirection="row" justifyContent="center" alignItems="center" overflow="hidden">
+        <Box key="wide" flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center" alignItems="center" overflow="hidden">
           {wide}
         </Box>
       ) : null}
       {wide ? null : (
-        <Box key="value" width={valueW} flexShrink={0} flexDirection="row" justifyContent="center">
-          {value === '' ? null : level === 'warn' || level === 'bad' ? <Text color={THEME[level]}>{value}</Text> : level === 'off' ? <Text dimColor>{value}</Text> : <Text>{value}</Text>}
+        <Box key="value" width={col.value} flexShrink={0} flexDirection="row" justifyContent="center">
+          {value === '' ? null : valueText}
         </Box>
       )}
       {wide ? null : (
-        <Box key="label" flexGrow={1} flexDirection="row" justifyContent="center" overflow="hidden" paddingLeft={1}>
+        <Box key="label" flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center" overflow="hidden">
           {label}
         </Box>
       )}
@@ -311,22 +314,22 @@ function slot(t: Elements, surface: string, key: string, valueW: number, icon: J
 }
 
 // a ring that fills in its level's colour, or a plain grey outline; glyphs on the terminal, which draws Svg blank
-function iconOf(t: Elements, surface: string, icon: Icon, frac: number, level: Level): JSX.Element {
+function iconOf(t: Elements, surface: string, icon: Icon, frac: number, level: Level, name: string): JSX.Element {
   const { Text } = t
   if (surface !== 'terminal' && 'Svg' in t) {
     const { Svg } = t
-    return <Svg source={icon === 'ring' ? ringSvg(frac, level) : iconSvg(icon)} alt="" width={16} height={16} />
+    return <Svg source={icon === 'ring' ? ringSvg(frac, level) : iconSvg(icon)} alt={name} width={16} height={16} />
   }
   if (icon === 'ring') return <Text color={THEME[level]}>{glyphOf(frac)}</Text>
   return <Text dimColor>{ICON_GLYPH[icon]}</Text>
 }
 
 // the session's state: a small dot, grey when idle, green while running, yellow while it waits on you
-function dotOf(t: Elements, surface: string, level: Level): JSX.Element {
+function dotOf(t: Elements, surface: string, level: Level, name: string): JSX.Element {
   const { Text } = t
   if (surface !== 'terminal' && 'Svg' in t) {
     const { Svg } = t
-    return <Svg source={dotSvg(level)} alt="" width={16} height={16} />
+    return <Svg source={dotSvg(level)} alt={name} width={16} height={16} />
   }
   return <Text color={THEME[level]}>•</Text>
 }
@@ -715,17 +718,16 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
   const maxW = stepsMaxWidth(bodyColumns)
   await read($, progressTick)
   const now = await $.clock.now()
-  const w3 = layout.valueW[2] ?? 4
-  const w4 = layout.valueW[3] ?? 4
+  const col = (i: number) => layout[i] ?? COLUMN
   const steps = <Text dimColor>步骤</Text>
   const progress = <Text dimColor>进度</Text>
 
   if (!p) {
-    return gridRow(t, 'bar-none', layout.cols, [
-      slot(t, surface, 'title', 0, <Text dimColor>○</Text>, '', null, 'off', <Text dimColor wrap="truncate">暂无进行中的任务</Text>),
-      slot(t, surface, 'steps', 0, null, '', null, 'off', <Text dimColor>—</Text>),
-      slot(t, surface, 'count', w3, iconOf(t, surface, 'steps', 0, 'off'), '0/0', steps, 'off'),
-      slot(t, surface, 'pct', w4, iconOf(t, surface, 'ring', 0, 'off'), '0%', progress, 'off'),
+    return gridRow(t, 'bar-none', layout, [
+      slot(t, surface, 'title', col(0), <Text dimColor>○</Text>, '', null, 'off', <Text dimColor wrap="truncate">暂无进行中的任务</Text>),
+      slot(t, surface, 'steps', col(1), null, '', null, 'off', <Text dimColor>—</Text>),
+      slot(t, surface, 'count', col(2), iconOf(t, surface, 'steps', 0, 'off', '步骤'), '0/0', steps, 'off'),
+      slot(t, surface, 'pct', col(3), iconOf(t, surface, 'ring', 0, 'off', '进度'), '0%', progress, 'off'),
     ])
   }
 
@@ -757,31 +759,31 @@ async function drawProgress($: EngineInterface, surface: string, bodyColumns: nu
 
   return (
     <Box key={`bar-${p.id}`} flexDirection="column" width="100%">
-      {gridRow(t, `row-${p.id}`, layout.cols, [
-        slot(t, surface, 'title', 0, <Text color={color}>{STATE_GLYPH[p.state]}</Text>, '', null, 'ok', <Text wrap="truncate">{p.title}</Text>),
-        slot(t, surface, 'steps', 0, null, '', null, 'ok', bars),
-        slot(t, surface, 'count', w3, iconOf(t, surface, 'steps', 0, 'off'), segmentsCount(p), steps, 'ok'),
-        slot(t, surface, 'pct', w4, iconOf(t, surface, 'ring', pct / 100, pctLevel), `${pct}%`, progress, 'ok'),
+      {gridRow(t, `row-${p.id}`, layout, [
+        slot(t, surface, 'title', col(0), <Text color={color}>{STATE_GLYPH[p.state]}</Text>, '', null, 'ok', <Text wrap="truncate">{p.title}</Text>),
+        slot(t, surface, 'steps', col(1), null, '', null, 'ok', bars),
+        slot(t, surface, 'count', col(2), iconOf(t, surface, 'steps', 0, 'off', '步骤'), segmentsCount(p), steps, 'ok'),
+        slot(t, surface, 'pct', col(3), iconOf(t, surface, 'ring', pct / 100, pctLevel, '进度'), `${pct}%`, progress, 'ok'),
       ])}
       {v && Svg ? <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="${stripsW}" height="${stripsH}">${stripsSvg(v, stripsW, now)}</svg>`} alt={`agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}`} width={stripsW} height={stripsH} /> : null}
     </Box>
   )
 }
 
-// one row of the band's grid: the columns gridColumns sized, shared by every row, so the cells line up down the rows;
-// a thin vertical rule between columns
-function gridRow(t: Elements, key: string, cols: string[], cells: JSX.Element[]) {
+// one row of the band's grid: the same four columns on every row, so the groups line up down the rows;
+// a thin vertical rule between columns, each group centred in what is left of its column
+function gridRow(t: Elements, key: string, layout: Layout, row: JSX.Element[]) {
   const { Box, Text } = t
   return (
     <Box key={key} flexDirection="row" alignItems="center" width="100%">
-      {cells.map((c, i) => (
-        <Box key={`col-${i}`} width={cols[i] ?? '25%'} flexDirection="row" alignItems="center">
+      {row.map((c, i) => (
+        <Box key={`col-${i}`} width={layout[i]?.width ?? '25%'} flexDirection="row" alignItems="center">
           {i > 0 ? (
             <Text key="rule" dimColor>
               │
             </Text>
           ) : null}
-          <Box key="cell" flexGrow={1} flexDirection="row" alignItems="center" paddingLeft={i > 0 ? 1 : 0} paddingRight={i < cells.length - 1 ? 1 : 0}>
+          <Box key="cell" flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center" alignItems="center">
             {c}
           </Box>
         </Box>
@@ -817,31 +819,24 @@ function stepsMaxWidth(bodyColumns: number) {
   return Math.max(80, Math.round((bodyColumns || 100) * 8 * 0.3))
 }
 
-// the grid's columns from what the three rows will show right now, and each column's value slot
+// the grid's columns from what the three rows will show right now
 async function bandColumns($: EngineInterface, surface: string, bodyColumns: number): Promise<Layout> {
   const isTerminal = surface === 'terminal'
-  const unit = isTerminal ? 1 : CELL_PX
-  const total = (bodyColumns || (isTerminal ? 80 : 100)) * unit
   const u = await read($, usage)
   const busy = await read($, activity)
   const { usage: top, spend } = usageCells(u, opts, await $.clock.now())
   const p = shownBar(await read($, plans))
-  const count = p ? segmentsCount(p) : '0/0'
-  const valueW = [0, 1, 2].map(i => valueCells([top[i]?.value ?? '', spend[i]?.value ?? '', ...(i === 2 ? [count] : [])]))
-  valueW.push(valueCells(['100%']))
   const status = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
-  const wide = (s: number) => (ICON_CELLS + 3) * unit + s
-  const rows: number[][] = [
-    [...top.map((c, i) => cellWidth(valueW[i] ?? 4, c.label, isTerminal)), cellWidth(valueW[3] ?? 4, status, isTerminal)],
-    [...spend.map((c, i) => cellWidth(valueW[i] ?? 4, c.label, isTerminal)), cellWidth(valueW[3] ?? 4, '详情 ›', isTerminal)],
+  // the step bars: one glyph each on the terminal; on desktop the Svg's px at ~8 a cell
+  const steps = !p ? 1 : isTerminal ? segments(p).reduce((k, st, i) => k + st.length + (i > 0 ? 1 : 0), 0) : Math.ceil(segmentsSvg(p, stepsMaxWidth(bodyColumns)).width / 8)
+  const pick = (i: number) => [top[i], spend[i]].filter((c): c is Cell => c !== undefined)
+  const content = [
+    columnContent(pick(0).map(c => c.value), pick(0).map(c => c.label), [cells(p ? p.title : '暂无进行中的任务')]),
+    columnContent(pick(1).map(c => c.value), pick(1).map(c => c.label), [steps]),
+    columnContent([...pick(2).map(c => c.value), p ? segmentsCount(p) : '0/0'], [...pick(2).map(c => c.label), '步骤']),
+    columnContent(['100%'], ['进度'], [cells(status), cells('详情 ›')]),
   ]
-  if (p) {
-    const steps = isTerminal ? segments(p).reduce((k, st, i) => k + st.length + (i > 0 ? 1 : 0), 0) : segmentsSvg(p, stepsMaxWidth(bodyColumns)).width
-    rows.push([wide(measure(p.title, isTerminal)), wide(steps), cellWidth(valueW[2] ?? 4, '步骤', isTerminal), cellWidth(valueW[3] ?? 4, '进度', isTerminal)])
-  } else {
-    rows.push([wide(measure('暂无进行中的任务', isTerminal)), wide(unit), cellWidth(valueW[2] ?? 4, '步骤', isTerminal), cellWidth(valueW[3] ?? 4, '进度', isTerminal)])
-  }
-  return { cols: gridColumns(rows, total), valueW }
+  return bandLayout(content, bodyColumns || 80)
 }
 
 // ---------- session title and the band ----------

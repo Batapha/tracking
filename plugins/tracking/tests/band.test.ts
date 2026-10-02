@@ -80,11 +80,23 @@ for (const surface of SURFACES) {
       }
       return undefined
     }
-    for (const col of [0, 1, 2, 3]) {
+    for (const col of [0, 1, 2]) {
       const ws = await Promise.all(['row-usage', 'row-spend'].map(async k => slotIn((await row(k))[col] as Node, 'value')?.props.width))
-      expect(ws[0]).toBeGreaterThan(0)
+      expect(ws[0]).toMatch(/^\d+%$/)
       expect(ws[1]).toBe(ws[0])
     }
+    // and each column's group is one width on every row, centred in the column
+    for (const col of [0, 1, 2, 3]) {
+      const cellBoxes = await Promise.all(['row-usage', 'row-spend', 'bar-none'].map(async k => slotIn((await row(k))[col] as Node, 'cell')))
+      expect(cellBoxes.every(b => b?.props.justifyContent === 'center')).toBe(true)
+      const groups = cellBoxes.map(b => ((b?.children ?? [])[0] as Node | undefined)?.props.width)
+      expect(groups[0]).toMatch(/^\d+%$/)
+      expect(new Set(groups).size).toBe(1)
+    }
+    // the status and 详情 have no value: they span the value and label slots, centred
+    for (const k of ['row-usage', 'row-spend']) expect(slotIn((await row(k))[3] as Node, 'wide')).toBeDefined()
+    // every icon names itself, so desktop draws it
+    expect((await ui.findAll({ type: 'Svg' })).filter(x => !x.props.alt)).toHaveLength(0)
     expect((await ui.find({ key: 'row-usage' }))?.text).toMatch(/空闲$/)
     expect((await ui.find({ key: 'row-spend' }))?.text).toMatch(/详情 ›$/)
     // one weight everywhere: nothing bold

@@ -274,29 +274,45 @@ export function measure(s: string, isTerminal: boolean): number {
   }, 0)
 }
 
-// a cell's three slots: the icon (fixed), the value (fixed per column, centred), the label (the rest, centred).
-// Slot widths are in character cells, which the surfaces lay out in; desktop draws a cell about 8 CSS px wide.
-export const ICON_CELLS = 3
-export const CELL_PX = 8
-export function valueCells(values: readonly string[]): number {
-  return Math.max(3, ...values.map(v => Math.ceil(measure(v, true)))) + 1
-}
-// how wide a cell is in the grid's unit (terminal cells, desktop px), with the divider and padding around it
-export function cellWidth(valueW: number, label: string, isTerminal: boolean): number {
-  const unit = isTerminal ? 1 : CELL_PX
-  return (ICON_CELLS + valueW + 4) * unit + measure(label, isTerminal)
+// ---------- the band's layout ----------
+// Every width is an integer percent: the surfaces lay a Box's number out in units that differ (terminal cells,
+// desktop pixels), but a percent of its parent means the same on both. Sizes are worked out in terminal cells
+// (CJK two, the rest one), which on desktop, ~8 px a cell at a 13 px font, errs a little wide, never narrow.
+
+// one column's content, in cells: its widest value, its widest label, and its widest cell that spans both
+export type ColumnContent = { value: number; label: number; wide: number }
+// one column as drawn: its share of the band, its group's share of the column, and the icon's and value's shares of the group
+export type ColumnLayout = { width: string; group: string; icon: string; value: string }
+
+export const ICON_CELLS = 2 // the icon and the gap after it
+const GAP = 1 // between the value and the label
+const RULE = 3 // the vertical rule and the padding either side
+
+export const cells = (s: string) => Math.ceil(measure(s, true))
+
+export function columnContent(values: readonly string[], labels: readonly string[], wide: readonly number[] = []): ColumnContent {
+  return {
+    value: Math.max(3, ...values.map(cells)) + 1,
+    label: Math.max(2, ...labels.map(cells)),
+    wide: Math.max(0, ...wide),
+  }
 }
 
-// four columns shared by every row, as percentages of the band: each column as wide as its widest cell,
-// and the room left over split evenly into the three gaps, so the cells line up down the rows and sit
-// evenly across them; the last column is only as wide as its content and ends at the right edge.
-export function gridColumns(rows: readonly (readonly number[])[], total: number, n = 4): string[] {
-  const widest = Array.from({ length: n }, (_, i) => Math.min(total * 0.4, Math.max(0, ...rows.map(r => r[i] ?? 0))))
-  const sum = widest.reduce((a, b) => a + b, 0)
+// each column's group is icon · value · label, as wide as its widest; the room left over is split evenly across all
+// four columns, so every group sits in the middle of its column with the same space around it
+export function bandLayout(content: readonly ColumnContent[], total: number): ColumnLayout[] {
+  const cap = Math.max(12, Math.floor(total * 0.4))
+  const groups = content.map(c => Math.min(cap, Math.max(ICON_CELLS + c.value + GAP + c.label, ICON_CELLS + c.wide)))
+  const needed = groups.map(g => g + RULE)
+  const sum = needed.reduce((a, b) => a + b, 0)
   const slack = total - sum
-  const widths = slack > 0 ? widest.map((w, i) => (i < n - 1 ? w + slack / (n - 1) : w)) : widest.map(w => (w / Math.max(1, sum)) * total)
-  // whole percents: the surfaces take a number or an integer percentage
+  const widths = slack > 0 ? needed.map(w => w + slack / content.length) : needed.map(w => (w / sum) * total)
   const pct = widths.map(w => Math.max(1, Math.floor((w / total) * 100)))
-  pct[n - 1] = Math.max(1, 100 - pct.slice(0, n - 1).reduce((a, b) => a + b, 0))
-  return pct.map(p => `${p}%`)
+  pct[pct.length - 1] = Math.max(1, 100 - pct.slice(0, -1).reduce((a, b) => a + b, 0))
+  const share = (part: number, whole: number) => `${Math.max(1, Math.min(100, Math.round((part / Math.max(1, whole)) * 100)))}%`
+  return content.map((c, i) => {
+    const g = groups[i] ?? 1
+    const column = ((pct[i] ?? 25) / 100) * total - RULE
+    return { width: `${pct[i]}%`, group: share(g, column), icon: share(ICON_CELLS, g), value: share(c.value, g) }
+  })
 }

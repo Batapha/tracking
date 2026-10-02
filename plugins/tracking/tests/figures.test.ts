@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Plan, Usage } from '../types'
-import { ctxLevel, gridColumns, renderTitle, usageCells } from '../hooks/figures'
+import { bandLayout, columnContent, ctxLevel, renderTitle, usageCells } from '../hooks/figures'
 import { costOf, modelLabel } from '../hooks/pricing'
 import { shownBar } from '../hooks/bars'
 import { DEFAULTS, EMPTY_USAGE } from '../hooks/state'
@@ -101,10 +101,24 @@ test('the third row shows the latest open task, else the latest bar', () => {
   expect(shownBar([b])?.id).toBe('b')
 })
 
-test('grid columns: each as wide as its widest cell, the room left split evenly into the gaps', () => {
-  // band 1000 wide; widest cells 200, 150, 150, 50 → 450 left, 150 per gap
-  const cols = gridColumns([[200, 100, 150, 50], [120, 150, 90, 40]], 1000)
-  expect(cols).toEqual(['35%', '30%', '30%', '5%'])
-  // too wide for the band: shrink in proportion, no gaps
-  expect(gridColumns([[300, 300, 300, 200]], 1000)).toEqual(['27%', '27%', '27%', '19%'])
+test('band layout: each group as wide as its widest value and label, the room left split evenly, all in whole percents', () => {
+  // groups 27, 31, 25, 12 cells (icon 2 + value + gap 1 + label, or icon + a wider spanning cell); +3 each for the rule
+  const layout = bandLayout(
+    [
+      { value: 4, label: 20, wide: 10 },
+      { value: 6, label: 22, wide: 0 },
+      { value: 6, label: 16, wide: 0 },
+      { value: 5, label: 4, wide: 6 },
+    ],
+    120,
+  )
+  expect(layout.map(c => c.width)).toEqual(['27%', '31%', '26%', '16%'])
+  expect(layout[0]).toMatchObject({ group: '92%', icon: '7%', value: '15%' })
+  for (const c of layout) for (const v of [c.width, c.group, c.icon, c.value]) expect(v).toMatch(/^\d+%$/)
+  // too wide for the band: columns shrink in proportion and a group never exceeds its column
+  const tight = bandLayout([{ value: 6, label: 40, wide: 0 }, { value: 6, label: 40, wide: 0 }, { value: 6, label: 40, wide: 0 }, { value: 5, label: 4, wide: 6 }], 80)
+  expect(tight.reduce((a, c) => a + parseInt(c.width), 0)).toBe(100)
+  for (const c of tight) expect(parseInt(c.group)).toBeLessThanOrEqual(100)
+  // cells count CJK as two
+  expect(columnContent(['$2.41'], ['Opus 5.5 · 3.8M', '本会话'])).toEqual({ value: 6, label: 15, wide: 0 })
 })
