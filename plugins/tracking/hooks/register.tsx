@@ -1,5 +1,5 @@
 // Tracking: a two-row usage band above the prompt (ctx, 5h, weekly, cache countdown / session cost,
-// tokens per model), progress bars with sounds at each stage, and session titles.
+// tokens per model), progress bars, sounds when the person is needed, a turn ends or a quota runs out, and session titles.
 // Everything that touches $ lives in this file; bars.ts, figures.ts and pricing.ts are pure.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Register } from 'claude-code'
@@ -31,6 +31,16 @@ let opts: Options = DEFAULTS
 function play($: EngineInterface, name: Sound) {
   if (!opts.sounds) return
   void $.audio.play({ asset: `sounds/${name}.wav` }).catch(() => undefined)
+}
+
+// a quota at its limit can be heard twice (the window reading 100% and the refused request); ring once
+let quotaRungAt = 0
+async function ringQuota($: EngineInterface, text: string) {
+  const now = await $.clock.now()
+  if (now - quotaRungAt < 60_000) return
+  quotaRungAt = now
+  $.ui.toast(text, { timeoutMs: 8000 })
+  play($, 'quota')
 }
 
 function speak($: EngineInterface, text: string) {
@@ -83,17 +93,17 @@ async function checkQuota($: EngineInterface, opts: Options, windows: RateWindow
   const next: Record<string, number> = { ...before }
   let crossed: { kind: string; at: number; pct: number } | null = null
   for (const w of windows) {
-    const at = w.percentUsed >= 95 ? 95 : w.percentUsed >= 80 ? 80 : 0
+    const at = w.percentUsed >= 100 ? 100 : w.percentUsed >= 95 ? 95 : w.percentUsed >= 80 ? 80 : 0
     const was = before[w.kind] ?? 0
     // a window that reset starts over
     next[w.kind] = at
     if (at > was && (!crossed || at > crossed.at)) crossed = { kind: w.kind, at, pct: w.percentUsed }
   }
   await update($, alerted, () => next)
-  if (crossed) {
-    $.ui.toast(`${windowLabel(crossed.kind)} 额度已用 ${Math.round(crossed.pct)}%`, { timeoutMs: 8000 })
-    play($, 'quota')
-  }
+  if (!crossed) return
+  // 80% and 95% only toast; the sound is kept for a window that has run out
+  if (crossed.at === 100) await ringQuota($, `${windowLabel(crossed.kind)} 额度已用完`)
+  else $.ui.toast(`${windowLabel(crossed.kind)} 额度已用 ${Math.round(crossed.pct)}%`, { timeoutMs: 8000 })
 }
 
 // ---------- hooks ----------
@@ -393,8 +403,7 @@ function chime($: EngineInterface, prev: PlanState | undefined, next: PlanState)
     play($, 'decision')
     void update($, activity, () => 'waiting')
   }
-  if (next === 'error') play($, 'error')
-  if (next === 'done') play($, 'done')
+  // a bar that finishes or fails stays silent; the turn's end rings instead
 }
 
 async function putPlan($: EngineInterface, next: Plan) {
@@ -531,32 +540,37 @@ function registerProgress(on: On, options: Options) {
   })
 
   // an open bar at the end of a turn: a question to the user marks it waiting on its own;
-  // only a turn that did work and left the bar unexplained is sent back once
+  // only a turn that did work and left the bar unexplained is sent back once.
+  // A turn that really ends rings: the decision sound when it ends on a question, else the done sound.
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     await usageStop($, e.transcript_path)
-    if (e.stop_hook_active || result.block || isWaitingOnBackground || (e.background_tasks?.length ?? 0) > 0) return result
+    if (result.block || isWaitingOnBackground || (e.background_tasks?.length ?? 0) > 0) return result
     // a turn that ends on a question waits on the person, bar or no bar
     const asks = /[?？]\s*$/.test(e.last_assistant_message ?? '')
     const open = (await read($, plans)).filter(isOpenPlan)
-    if (asks && open.length === 0) {
+    if (!e.stop_hook_active && !asks && open.length > 0 && (workCalls > 0 || isPlanTouched)) {
+      return {
+        ...result,
+        block: `tracking: ${open.map(p => p.id).join(', ')} still open. Update each with ${TOOL}: {id, next:true}, or state "done", "needs_input" or "error" with a note.`,
+      }
+    }
+    const last = open[open.length - 1]
+    if (asks && last) await putPlan($, { ...last, state: 'needs_input' })
+    else if (asks) {
       await update($, activity, () => 'waiting')
       play($, 'decision')
-      return result
-    }
-    if (open.length === 0) return result
-    if (asks) {
-      const last = open[open.length - 1]
-      if (last) await putPlan($, { ...last, state: 'needs_input' })
+    } else play($, 'done')
 
-      return result
-    }
-    if (workCalls === 0 && !isPlanTouched) return result
+    return result
+  })
 
-    return {
-      ...result,
-      block: `tracking: ${open.map(p => p.id).join(', ')} still open. Update each with ${TOOL}: {id, next:true}, or state "done", "needs_input" or "error" with a note.`,
-    }
+  // a turn the API refused for the usage limit: the quota has run out
+  on('classic.StopFailure', async ($, e, next) => {
+    const result = await next(e)
+    if (e.error === 'rate_limit' && opts.quotaAlerts) await ringQuota($, '额度已用完，本轮已停止')
+
+    return result
   })
 
   on('session.start', async ($, e, next) => {
@@ -589,7 +603,7 @@ function registerProgress(on: On, options: Options) {
       if (agentHome.size > 0 || (await $.clock.now()) < foldUntil) await update($, progressTick, n => n + 1)
     })
     await $.command.register({ name: 'tracking-demo', description: '显示一条示例进度条' })
-    await $.command.register({ name: 'tracking-sounds', description: '试听提示音：等你决定、出错、完成、限额' })
+    await $.command.register({ name: 'tracking-sounds', description: '试听提示音：需要你回复、本轮完成、额度用完' })
     await $.command.register({ name: 'tracking-clear', description: '清掉所有进度条' })
 
     return next(e)
@@ -656,11 +670,11 @@ function registerProgress(on: On, options: Options) {
   })
 
   on('command.run', { command: 'tracking-sounds' }, async $ => {
-    const order: Sound[] = ['decision', 'error', 'done', 'quota']
+    const order: Sound[] = ['decision', 'done', 'quota']
     order.forEach((name, i) => (i === 0 ? play($, name) : $.clock.after(i * 1100, () => play($, name))))
     if (!opts.sounds) return { text: '提示音已在设置里关闭（/plugin → tracking → 配置 → 提示音）。' }
 
-    return { text: '依次播放：需要你决定、出错、任务完成、额度告警。' }
+    return { text: '依次播放：需要你回复、本轮完成、额度用完。' }
   })
 
   // always drawn, so the person sees the mod is loaded; it shows and hides the whole Tracking band
@@ -741,8 +755,6 @@ function registerProgress(on: On, options: Options) {
       const isFailed = e.reason !== 'answer'
       const tool = e.reason === 'aborted' ? '已停止' : isFailed ? '失败' : '完成'
       await editAgent($, agentId, a => ({ ...a, state: isFailed ? 'error' : 'done', tool, endedAt: now }))
-      // the mod's own bar sounds through its state; a run on a task bar sounds here
-      if (isFailed && agentHome.get(agentId) !== AGENTS) play($, 'error')
       agentHome.delete(agentId)
       waiting.delete(agentId)
     }

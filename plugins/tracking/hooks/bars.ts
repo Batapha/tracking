@@ -1,5 +1,5 @@
 // Progress bars, adapted from plan-progress by Kirill Serditov (MIT, see LICENSE.plan-progress):
-// renamed into Tracking, Mac-only sounds, a sound (and optional speech) when a stage finishes,
+// renamed into Tracking, a sound when a bar waits on the person, optional speech when a stage finishes,
 // and the "waiting on you" state shared with the usage band.
 
 import type { AgentRun, Plan, PlanStage, PlanState, PlanStep, StepStatus } from '../types'

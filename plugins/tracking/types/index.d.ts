@@ -73,7 +73,7 @@ declare module 'claude-code' {
       tick: number
       isHidden: boolean
       activity: Activity
-      // the last quota threshold each window crossed (0, 80 or 95), so an alert sounds once
+      // the last quota threshold each window crossed (0, 80, 95 or 100), so an alert shows once
       alerted: Record<string, number>
       plans: Plan[]
       isOpen: boolean
