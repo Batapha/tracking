@@ -1,6 +1,6 @@
 {
   "name": "tracking",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "提示框上方三行：用量（上下文、5 小时、7 天限额）/ 缓存倒计时、本会话金额、各模型 token / 当前任务的步骤进度条；提示音、会话自动命名；可在对话里用文字显示/隐藏、改设置",
   "author": {
     "name": "Batapha"
@@ -11,13 +11,8 @@
     "cacheTtl": {
       "type": "string",
       "title": "提示缓存有效期",
-      "description": "auto 从会话记录里自动识别；也可固定为 5m 或 1h",
-      "default": "auto",
-      "options": [
-        "auto",
-        "5m",
-        "1h"
-      ]
+      "description": "填 auto（从会话记录里自动识别）、5m 或 1h；填其他值按 auto 处理",
+      "default": "auto"
     },
     "showRateLimits": {
       "type": "boolean",
