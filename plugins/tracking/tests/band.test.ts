@@ -115,7 +115,7 @@ for (const surface of SURFACES) {
     }
 
     const text = band?.text ?? ''
-    expect(text).toContain('51%') // ctx
+    expect(text).toContain('61%') // ctx: 101.5k of the 167k auto-compact point
     expect(text).toContain('距压缩')
     expect(text).toContain('42%') // 5h
     expect(text).toContain('5 小时')

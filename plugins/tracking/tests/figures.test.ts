@@ -150,3 +150,16 @@ test('the session total never lags the per-response ledger', () => {
   expect(sessionTotal({ ...EMPTY_USAGE }).total).toBe(null)
   expect(usageCells({ ...EMPTY_USAGE, models, costUsd: 0.31 }, DEFAULTS, 0).spend.find(c => c.key === 'cost')?.value).not.toBe('$0.31')
 })
+
+test('the context share counts toward auto-compact, so used and left add up to 100', () => {
+  // 1M window, auto-compact at 770k, 760k in use: 99% used, 1% left (not 76% and 1%)
+  const u: Usage = { ...EMPTY_USAGE, ctxTokens: 760_000, ctxWindow: 1_000_000, compactAt: 770_000 }
+  const [ctx] = usageCells(u, DEFAULTS, 0).usage
+  expect(ctx?.value).toBe('99%')
+  expect(ctx?.label).toBe('上下文 · 距压缩 1%')
+  expect(ctx?.frac).toBe(0.99)
+  // auto-compact off or not known yet: the window
+  const [off] = usageCells({ ...u, compactAt: null }, DEFAULTS, 0).usage
+  expect(off?.value).toBe('76%')
+  expect(off?.label).toBe('上下文')
+})

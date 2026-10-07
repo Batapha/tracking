@@ -21,15 +21,24 @@ export function ctxLevel(u: Usage): Level {
   return 'ok'
 }
 
-export function ctxPercent(u: Usage): number | null {
+// share of the window in use, for the detail pane
+export function windowPercent(u: Usage): number | null {
   if (u.ctxTokens === null || u.ctxWindow <= 0) return null
   return Math.min(100, Math.round((u.ctxTokens / u.ctxWindow) * 100))
 }
 
+// share used of what the session gets before auto-compact, so it and untilCompact add up to 100;
+// the window when auto-compact is off or not known yet
+export function ctxPercent(u: Usage): number | null {
+  if (u.compactAt === null || u.compactAt <= 0) return windowPercent(u)
+  if (u.ctxTokens === null) return null
+  return Math.min(100, Math.round((u.ctxTokens / u.compactAt) * 100))
+}
+
 // share left before auto-compact, as the engine's "N% until auto-compact" counts it
 export function untilCompact(u: Usage): number | null {
-  if (u.ctxTokens === null || u.compactAt === null || u.compactAt <= 0) return null
-  return Math.max(0, Math.round(((u.compactAt - u.ctxTokens) / u.compactAt) * 100))
+  const pct = u.compactAt === null ? null : ctxPercent(u)
+  return pct === null ? null : 100 - pct
 }
 
 export const quotaLevel = (pct: number): Level => (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok')
@@ -136,7 +145,8 @@ export function detailMarkdown(u: Usage, now: number, runs: AgentRun[] = []): st
   // opened from "子代理 N ›": the running agents come first
   const isAgentsFirst = runs.some(isLive)
   if (isAgentsFirst) lines.push(...agents.slice(1), '')
-  const pct = ctxPercent(u)
+  const pct = windowPercent(u)
+  const used = ctxPercent(u)
   const left = untilCompact(u)
   lines.push('**上下文**')
   lines.push('')
@@ -145,7 +155,7 @@ export function detailMarkdown(u: Usage, now: number, runs: AgentRun[] = []): st
       ? '还没有模型回复。'
       : pct === null
         ? `${fmtTokens(u.ctxTokens)} tokens（窗口大小未知）`
-        : `${fmtTokens(u.ctxTokens)} / ${fmtTokens(u.ctxWindow)} tokens（${pct}%）${left !== null ? `，距自动压缩 ${left}%` : ''}`,
+        : `${fmtTokens(u.ctxTokens)} / ${fmtTokens(u.ctxWindow)} tokens（占窗口 ${pct}%）${left !== null && u.compactAt !== null ? `；自动压缩线 ${fmtTokens(u.compactAt)}，已用 ${used}%，距压缩 ${left}%` : ''}`,
   )
   const cache = cacheLeftMs(u, now)
   if (cache !== null) {
