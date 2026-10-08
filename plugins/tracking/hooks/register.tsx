@@ -1,5 +1,5 @@
 // Tracking: a two-row usage band above the prompt (ctx, 5h, weekly, cache countdown / session cost,
-// tokens per model), progress bars, sounds when the person is needed, a turn ends or a quota runs out, and session titles.
+// tokens per model), progress bars, sounds only when the person is needed or a quota runs out, and session titles.
 // Everything that touches $ lives in this file; bars.ts, figures.ts and pricing.ts are pure.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Register } from 'claude-code'
@@ -41,6 +41,15 @@ async function ringQuota($: EngineInterface, text: string) {
   quotaRungAt = now
   $.ui.toast(text, { timeoutMs: 8000 })
   play($, 'quota')
+}
+
+// the person is needed: one ask can arrive by two roads at once (a bar set to wait, then the question itself); ring once
+let decisionRungAt = 0
+async function ringDecision($: EngineInterface) {
+  const now = await $.clock.now()
+  if (now - decisionRungAt < 5_000) return
+  decisionRungAt = now
+  play($, 'decision')
 }
 
 function speak($: EngineInterface, text: string) {
@@ -397,22 +406,24 @@ function agentDotOf(t: Elements, surface: string, color: string, name: string): 
 // ---------- engine glue ----------
 
 
-function chime($: EngineInterface, prev: PlanState | undefined, next: PlanState) {
+// only Claude setting a bar to wait on the person rings; a waiting agent or a turn ending on a question
+// only turns the bar amber (a real permission dialog rings through the Notification hook)
+function chime($: EngineInterface, prev: PlanState | undefined, next: PlanState, ring: boolean) {
   if (next === prev) return
   if (next === 'needs_input') {
-    play($, 'decision')
+    if (ring) void ringDecision($)
     void update($, activity, () => 'waiting')
   }
-  // a bar that finishes or fails stays silent; the turn's end rings instead
+  // a bar that finishes or fails stays silent, and so does the turn's end
 }
 
-async function putPlan($: EngineInterface, next: Plan) {
+async function putPlan($: EngineInterface, next: Plan, ring = true) {
   let prev: Plan | undefined
   await update($, plans, list => {
     prev = list.find(p => p.id === next.id)
     return placeBar(list, next)
   })
-  chime($, prev?.state, next.state)
+  chime($, prev?.state, next.state, ring)
   // a finished stage plays no sound (too frequent); it is spoken only when the person turned that on
   if (prev && next.state === 'running' && next.stages.length > 1) {
     const before = where(prev).stage
@@ -430,7 +441,7 @@ const toolUses = new Map<string, string>() // tool_use_id -> agentId, to find wh
 const waiting = new Set<string>()
 let foldUntil = 0 // keep ticking until finished runs have folded
 
-// changes one agent's run inside the latest list; sounds follow the bar's state
+// changes one agent's run inside the latest list; the bar's color follows, silently
 async function editAgent($: EngineInterface, agentId: string, change: (a: AgentRun) => AgentRun) {
   const home = agentHome.get(agentId)
   if (!home) return
@@ -449,7 +460,7 @@ async function editAgent($: EngineInterface, agentId: string, change: (a: AgentR
     }),
   )
   if (isFolding) foldUntil = now + FOLD_MS + 1500
-  if (before !== undefined && after !== undefined) chime($, before, after)
+  if (before !== undefined && after !== undefined) chime($, before, after, false)
 }
 
 function registerProgress(on: On, options: Options) {
@@ -541,7 +552,7 @@ function registerProgress(on: On, options: Options) {
 
   // an open bar at the end of a turn: a question to the user marks it waiting on its own;
   // only a turn that did work and left the bar unexplained is sent back once.
-  // A turn that really ends rings: the decision sound when it ends on a question, else the done sound.
+  // A turn's end is silent, whether it ends on a question or not; only the bar and the dot show it.
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     await usageStop($, e.transcript_path)
@@ -556,11 +567,19 @@ function registerProgress(on: On, options: Options) {
       }
     }
     const last = open[open.length - 1]
-    if (asks && last) await putPlan($, { ...last, state: 'needs_input' })
-    else if (asks) {
+    if (asks && last) await putPlan($, { ...last, state: 'needs_input' }, false)
+    else if (asks) await update($, activity, () => 'waiting')
+
+    return result
+  })
+
+  // the engine shows a permission dialog: the one permission moment that rings, for the main loop and its agents alike
+  on('classic.Notification', async ($, e, next) => {
+    const result = await next(e)
+    if (e.notification_type === 'permission_prompt') {
       await update($, activity, () => 'waiting')
-      play($, 'decision')
-    } else play($, 'done')
+      await ringDecision($)
+    }
 
     return result
   })
@@ -603,7 +622,7 @@ function registerProgress(on: On, options: Options) {
       if (agentHome.size > 0 || (await $.clock.now()) < foldUntil) await update($, progressTick, n => n + 1)
     })
     await $.command.register({ name: 'tracking-demo', description: '显示一条示例进度条' })
-    await $.command.register({ name: 'tracking-sounds', description: '试听提示音：需要你回复、本轮完成、额度用完' })
+    await $.command.register({ name: 'tracking-sounds', description: '试听提示音：需要你介入、额度用完' })
     await $.command.register({ name: 'tracking-clear', description: '清掉所有进度条' })
 
     return next(e)
@@ -635,7 +654,7 @@ function registerProgress(on: On, options: Options) {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const live = (await read($, plans)).filter(p => p.state === 'running').pop()
     if (live) await update($, plans, list => list.map(p => (p.id === live.id ? { ...p, state: 'needs_input' as const } : p)))
-    play($, 'decision')
+    await ringDecision($)
     await update($, activity, () => 'waiting')
     const ran = await next(e)
     if (live) await update($, plans, list => list.map(p => (p.id === live.id && p.state === 'needs_input' ? { ...p, state: 'running' as const } : p)))
@@ -644,7 +663,7 @@ function registerProgress(on: On, options: Options) {
   })
 
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
-    play($, 'decision')
+    await ringDecision($)
     const ran = await next(e)
     const text = ran.deny === undefined && ran.isError !== true ? (ran.result as { plan?: unknown } | undefined)?.plan : undefined
     if (typeof text === 'string') {
@@ -670,11 +689,11 @@ function registerProgress(on: On, options: Options) {
   })
 
   on('command.run', { command: 'tracking-sounds' }, async $ => {
-    const order: Sound[] = ['decision', 'done', 'quota']
+    const order: Sound[] = ['decision', 'quota']
     order.forEach((name, i) => (i === 0 ? play($, name) : $.clock.after(i * 1100, () => play($, name))))
     if (!opts.sounds) return { text: '提示音已在设置里关闭（/plugin → tracking → 配置 → 提示音）。' }
 
-    return { text: '依次播放：需要你回复、本轮完成、额度用完。' }
+    return { text: '依次播放：需要你介入、额度用完。' }
   })
 
   // always drawn, so the person sees the mod is loaded; it shows and hides the whole Tracking band
@@ -724,13 +743,12 @@ function registerProgress(on: On, options: Options) {
   // an agent waiting on a permission prompt turns its run (and the 详情 dot) amber until the call goes on
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
-    // the main loop held on a permission prompt: the session waits on the person
+    // the main loop held on a permission check: the dot turns amber; the sound waits for a dialog the engine really shows
     const mainId = e.tool_use_id
     if (mainId && mainCalls.has(mainId) && verdict.decision === 'ask') {
       $.clock.after(600, async () => {
         if (!mainCalls.has(mainId)) return
         await update($, activity, () => 'waiting')
-        play($, 'decision')
       })
     }
     const agentId = e.tool_use_id ? toolUses.get(e.tool_use_id) : undefined

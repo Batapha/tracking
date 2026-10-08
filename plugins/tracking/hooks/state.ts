@@ -53,8 +53,8 @@ export function readOptions(raw: unknown): Options {
   }
 }
 
-// decision: the person is needed; done: a turn of the session ended; quota: a window ran out
-export type Sound = 'decision' | 'done' | 'quota'
+// decision: the person is needed; quota: a window ran out (sounds/done.wav is kept but no longer played)
+export type Sound = 'decision' | 'quota'
 
 // green / yellow / red, as the theme names them on the terminal and as hex where an Svg draws
 export type Level = 'ok' | 'warn' | 'bad' | 'off'

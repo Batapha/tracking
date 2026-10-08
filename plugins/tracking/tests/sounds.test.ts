@@ -23,18 +23,17 @@ test('a finished or failed bar stays silent', async ($, on) => {
   expect(played).toEqual([])
 })
 
-test('a turn that ends rings done; one that ends on a question rings decision', async ($, on) => {
+test('a turn that ends is silent, whether or not it ends on a question', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   const played = listen(on)
   on('classic.Stop', async () => ({}))
   await $.classic.Stop({ stop_hook_active: false, last_assistant_message: '改好了。' } as never)
-  expect(played).toEqual(['sounds/done.wav'])
   await $.classic.Stop({ stop_hook_active: false, last_assistant_message: '要继续吗？' } as never)
-  expect(played).toEqual(['sounds/done.wav', 'sounds/decision.wav'])
+  expect(played).toEqual([])
 })
 
-test('a turn sent back to update its bar does not ring until it really ends', async ($, on) => {
+test('a turn ending on a question with a bar open turns it amber but stays silent', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   const played = listen(on)
@@ -42,9 +41,39 @@ test('a turn sent back to update its bar does not ring until it really ends', as
   await $.tool.call({ tool: TOOL, id: 'a', title: 'A', stages: [{ name: 's', steps: [{ title: 'x', status: 'active' }] }] } as never)
   const first = await $.classic.Stop({ stop_hook_active: false, last_assistant_message: '做完一半。' } as never)
   expect(first).toMatchObject({ block: expect.stringContaining('still open') })
+  await $.classic.Stop({ stop_hook_active: true, last_assistant_message: '先这样，要继续吗？' } as never)
   expect(played).toEqual([])
-  await $.classic.Stop({ stop_hook_active: true, last_assistant_message: '已更新。' } as never)
-  expect(played).toEqual(['sounds/done.wav'])
+})
+
+test('Claude setting a bar to wait on the person rings decision once', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const played = listen(on)
+  await $.tool.call({ tool: TOOL, id: 'a', title: 'A', stages: [{ name: 's', steps: [{ title: 'x', status: 'active' }] }] } as never)
+  await $.tool.call({ tool: TOOL, id: 'a', state: 'needs_input', note: '选哪个' } as never)
+  expect(played).toEqual(['sounds/decision.wav'])
+})
+
+test('a permission dialog the engine shows rings decision; other notifications stay silent', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const played = listen(on)
+  on('classic.Notification', async () => ({}))
+  await $.classic.Notification({ notification_type: 'idle_prompt', message: 'idle' } as never)
+  expect(played).toEqual([])
+  await $.classic.Notification({ notification_type: 'permission_prompt', message: 'Claude needs your permission' } as never)
+  expect(played).toEqual(['sounds/decision.wav'])
+})
+
+test('two asks within five seconds ring once', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const played = listen(on)
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ result: { answers: {} } }) as never)
+  await $.tool.call({ tool: TOOL, id: 'a', title: 'A', stages: [{ name: 's', steps: [{ title: 'x', status: 'active' }] }] } as never)
+  await $.tool.call({ tool: TOOL, id: 'a', state: 'needs_input', note: '选哪个' } as never)
+  await $.tool.call({ tool: 'AskUserQuestion', questions: [] } as never)
+  expect(played).toEqual(['sounds/decision.wav'])
 })
 
 test('a quota rings only once it has run out', async ($, on) => {

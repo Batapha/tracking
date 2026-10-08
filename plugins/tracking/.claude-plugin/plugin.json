@@ -1,6 +1,6 @@
 {
   "name": "tracking",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "提示框上方三行：用量（上下文、5 小时、7 天限额）/ 缓存倒计时、本会话金额、各模型 token / 当前任务的步骤进度条；提示音、会话自动命名；可在对话里用文字显示/隐藏、改设置",
   "author": {
     "name": "Batapha"
@@ -29,7 +29,7 @@
     "sounds": {
       "type": "boolean",
       "title": "提示音",
-      "description": "只在需要你回复、本轮对话结束、额度用完时播放声音",
+      "description": "只在需要你介入（提问、计划、权限框）和额度用完时播放声音",
       "default": true
     },
     "speakStages": {
