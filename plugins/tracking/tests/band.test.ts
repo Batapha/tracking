@@ -97,7 +97,7 @@ for (const surface of SURFACES) {
     for (const k of ['row-usage', 'row-spend']) expect(slotIn((await row(k))[3] as Node, 'wide')).toBeDefined()
     // every icon names itself, so desktop draws it
     expect((await ui.findAll({ type: 'Svg' })).filter(x => !x.props.alt)).toHaveLength(0)
-    expect((await ui.find({ key: 'row-usage' }))?.text).toMatch(/空闲$/)
+    expect((await ui.find({ key: 'row-usage' }))?.text).toMatch(surface === 'desktop' ? /空闲 ?Tracking$/ : /空闲$/)
     expect((await ui.find({ key: 'row-spend' }))?.text).toMatch(/详情 ›$/)
     // one weight everywhere: nothing bold
     expect((await ui.findAll({ type: 'Text' })).filter(x => x.props.bold)).toHaveLength(0)
@@ -156,4 +156,35 @@ test('the session title follows the template', { options: { titleTemplate: '{pro
   on('classic.SessionStart', async () => ({}))
   const result = await $.classic.SessionStart({ source: 'startup', cwd: '/Users/batapha/shop' } as never)
   expect(result).toMatchObject({ sessionTitle: 'shop' })
+})
+
+test('the Tracking switch sits in the band on the desktop, in the footer on the terminal', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on)
+  answerEngine(on)
+  on('ui.render', { component: 'SessionMode' }, async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return h(Text, { key: 'engine-modes' }) as RenderElement
+  })
+  await $.session.start({ cwd: '/Users/batapha/shop', surface: 'desktop', isInteractive: true })
+  const props = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120 } as never
+  const band = await $.ui.mount({ plugin: 'tracking', surface: 'desktop', component: 'AbovePrompt', props })
+  const status = await band.find({ key: 'status-toggle' })
+  expect(status?.text).toMatch(/空闲.*Tracking/)
+  // the desktop footer gets nothing from us
+  const footer = await $.ui.mount({ plugin: 'tracking', surface: 'desktop', component: 'SessionMode', props: { modes: [] } as never })
+  expect(await footer.find({ type: 'Button', text: 'Tracking' })).toBeUndefined()
+
+  // hide: the band shrinks to one slim row that still carries the switch; press it again to bring the band back
+  await band.press({ key: 'tracking-toggle' })
+  expect(await band.find({ key: 'tracking-usage' })).toBeUndefined()
+  expect(await band.find({ key: 'tracking-hidden' })).toBeDefined()
+  await band.press({ key: 'tracking-toggle' })
+  expect(await band.find({ key: 'tracking-usage' })).toBeDefined()
+
+  // the terminal keeps the switch in the footer and none in the band
+  const term = await $.ui.mount({ plugin: 'tracking', surface: 'terminal', component: 'SessionMode', props: { modes: [] } as never })
+  expect(await term.find({ type: 'Button', text: 'Tracking' })).toBeDefined()
+  const termBand = await $.ui.mount({ plugin: 'tracking', surface: 'terminal', component: 'AbovePrompt', props })
+  expect(await termBand.find({ key: 'status-toggle' })).toBeUndefined()
 })

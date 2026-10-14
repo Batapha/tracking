@@ -296,7 +296,26 @@ async function drawUsage($: EngineInterface, e: { surface: string; props: { body
   const statusLabel = busy === 'waiting' ? '等你' : busy === 'running' ? '运行中' : '空闲'
   // while subagents run the 详情 cell counts them; the pane lists what each one does
   const agents = agentsCell(agentRuns(await read($, plans)))
-  const status = slot(t, e.surface, 'status', col(3), dotOf(t, e.surface, statusLevel, statusLabel), '', null, 'ok', <Text dimColor>{statusLabel}</Text>)
+  // on the desktop the footer's mode slot now sits on a row of its own, so the toggle lives here, beside the status
+  const statusText = <Text dimColor>{statusLabel}</Text>
+  const status = slot(
+    t,
+    e.surface,
+    'status',
+    col(3),
+    dotOf(t, e.surface, statusLevel, statusLabel),
+    '',
+    null,
+    'ok',
+    e.surface === 'desktop' ? (
+      <Box key="status-toggle" flexDirection="row" alignItems="center" gap={1}>
+        {statusText}
+        {toggleButton($, t, false)}
+      </Box>
+    ) : (
+      statusText
+    ),
+  )
   const detail = slot(
     t,
     e.surface,
@@ -319,6 +338,12 @@ async function drawUsage($: EngineInterface, e: { surface: string; props: { body
 }
 
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
+
+// the switch that shows and hides the whole band: in the footer's mode slot on the terminal, in the band on the desktop
+function toggleButton($: EngineInterface, t: Elements, hidden: boolean) {
+  const { Button } = t
+  return <Button key="tracking-toggle" plain dimColor={hidden} label="Tracking" onPress={() => update($, isHidden, () => !hidden)} />
+}
 // the four columns: each one's share of the band and how its group divides
 type Layout = ColumnLayout[]
 const COLUMN: ColumnLayout = { width: '25%', group: '100%', icon: '15%', value: '30%' }
@@ -697,7 +722,9 @@ function registerProgress(on: On, options: Options) {
   })
 
   // always drawn, so the person sees the mod is loaded; it shows and hides the whole Tracking band
+  // the desktop draws it in the band instead (drawUsage, and a slim row while hidden)
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.surface === 'desktop') return next(e)
     const hidden = await read($, isHidden)
     const { Box, Button } = $.ui.resolve(e)
     // other mods add their labels to modes beneath us; keep them
@@ -930,9 +957,18 @@ export const register: Register = (on, options) => {
     const t = $.ui.resolve(e)
     const layout = await bandColumns($, e.surface, e.props.bodyColumns)
     const top = await drawUsage($, e, opts, t, layout)
-    const bars = (await read($, isHidden)) ? null : await drawProgress($, e.surface, e.props.bodyColumns, t, layout)
-    if (!top && !bars) return next(e)
+    const hidden = await read($, isHidden)
+    const bars = hidden ? null : await drawProgress($, e.surface, e.props.bodyColumns, t, layout)
     const { Box } = t
+    // hidden on the desktop: one slim row, the switch at its right end, so the band can come back
+    if (hidden && e.surface === 'desktop') {
+      return (
+        <Box key="tracking-hidden" flexDirection="row" width="100%" justifyContent="flex-end">
+          {toggleButton($, t, true)}
+        </Box>
+      )
+    }
+    if (!top && !bars) return next(e)
 
     return (
       <Box flexDirection="column" width="100%">
