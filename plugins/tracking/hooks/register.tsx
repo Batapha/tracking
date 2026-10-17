@@ -33,12 +33,29 @@ function play($: EngineInterface, name: Sound) {
   void $.audio.play({ asset: `sounds/${name}.wav` }).catch(() => undefined)
 }
 
-// a quota at its limit can be heard twice (the window reading 100% and the refused request); ring once
+// a quota at its limit can be heard twice (the window reading 100% and the refused request), or across open sessions; ring once
 let quotaRungAt = 0
+let isProbeSession = false
+
+type StoredQuota = { windows?: Record<string, { at: number; resetsAt: string | null }>; rungAt?: number }
+
+async function readStoredQuota($: EngineInterface): Promise<StoredQuota> {
+  const raw = await $.store.get('quota-alerted').catch(() => undefined)
+  return raw && typeof raw === 'object' ? (raw as StoredQuota) : {}
+}
+
+async function writeStoredQuota($: EngineInterface, data: StoredQuota) {
+  await $.store.set('quota-alerted', data).catch(() => undefined)
+}
+
 async function ringQuota($: EngineInterface, text: string) {
+  if (isProbeSession) return
   const now = await $.clock.now()
-  if (now - quotaRungAt < 60_000) return
+  const stored = await readStoredQuota($)
+  const lastRung = Math.max(quotaRungAt, stored.rungAt ?? 0)
+  if (now - lastRung < 60_000) return
   quotaRungAt = now
+  await writeStoredQuota($, { ...stored, rungAt: now })
   $.ui.toast(text, { timeoutMs: 8000 })
   play($, 'quota')
 }
@@ -46,6 +63,7 @@ async function ringQuota($: EngineInterface, text: string) {
 // the person is needed: one ask can arrive by two roads at once (a bar set to wait, then the question itself); ring once
 let decisionRungAt = 0
 async function ringDecision($: EngineInterface) {
+  if (isProbeSession) return
   const now = await $.clock.now()
   if (now - decisionRungAt < 5_000) return
   decisionRungAt = now
@@ -53,7 +71,7 @@ async function ringDecision($: EngineInterface) {
 }
 
 function speak($: EngineInterface, text: string) {
-  if (!opts.speakStages) return
+  if (!opts.speakStages || isProbeSession) return
   void $.audio.speak(text).catch(() => undefined)
 }
 
@@ -97,18 +115,26 @@ async function detectTtl($: EngineInterface, transcriptPath: string | undefined)
 }
 
 async function checkQuota($: EngineInterface, opts: Options, windows: RateWindow[]) {
-  if (!opts.quotaAlerts) return
+  if (!opts.quotaAlerts || isProbeSession) return
   const before = await read($, alerted)
+  const stored = await readStoredQuota($)
+  const storedWindows = { ...(stored.windows ?? {}) }
   const next: Record<string, number> = { ...before }
   let crossed: { kind: string; at: number; pct: number } | null = null
   for (const w of windows) {
     const at = w.percentUsed >= 100 ? 100 : w.percentUsed >= 95 ? 95 : w.percentUsed >= 80 ? 80 : 0
-    const was = before[w.kind] ?? 0
-    // a window that reset starts over
-    next[w.kind] = at
+    const prevStored = storedWindows[w.kind]
+    // if resetsAt changed to a new window (both non-null and different), or percent dropped below 80%, the window reset
+    const sameWindow = !prevStored || !w.resetsAt || !prevStored.resetsAt || prevStored.resetsAt === w.resetsAt
+    const wasStored = sameWindow && at > 0 ? (prevStored?.at ?? 0) : 0
+    const wasLocal = sameWindow && at > 0 ? (before[w.kind] ?? 0) : 0
+    const was = Math.max(wasLocal, wasStored)
+    next[w.kind] = Math.max(at, was)
+    storedWindows[w.kind] = { at: next[w.kind] ?? at, resetsAt: w.resetsAt ?? prevStored?.resetsAt ?? null }
     if (at > was && (!crossed || at > crossed.at)) crossed = { kind: w.kind, at, pct: w.percentUsed }
   }
   await update($, alerted, () => next)
+  await writeStoredQuota($, { ...stored, windows: storedWindows })
   if (!crossed) return
   // 80% and 95% only toast; the sound is kept for a window that has run out
   if (crossed.at === 100) await ringQuota($, `${windowLabel(crossed.kind)} 额度已用完`)
@@ -618,6 +644,7 @@ function registerProgress(on: On, options: Options) {
   })
 
   on('session.start', async ($, e, next) => {
+    if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
     await usageSessionStart($)
     await $.tool.register({
       name: 'plan_progress',
@@ -980,6 +1007,7 @@ export const register: Register = (on, options) => {
   })
 
   on('classic.SessionStart', async ($, e, next) => {
+    if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
     transcriptPath = e.transcript_path ?? transcriptPath
     const result = await next(e)
     const sessionTitle = await sessionTitleFor($, opts, e.cwd)
@@ -987,6 +1015,7 @@ export const register: Register = (on, options) => {
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
+    if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
     transcriptPath = e.transcript_path ?? transcriptPath
     const result = await next(e)
     const sessionTitle = await sessionTitleFor($, opts, e.cwd)

@@ -99,3 +99,53 @@ test('a quota rings only once it has run out', async ($, on) => {
   expect(played).toEqual(['sounds/quota.wav'])
   expect(toasts.length).toBe(3)
 })
+
+test('a quota already alerted in store does not ring again until its reset window changes', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.store(on, {
+    'quota-alerted': {
+      windows: { five_hour: { at: 100, resetsAt: '2026-10-17T14:00:00Z' } },
+      rungAt: 900_000,
+    },
+  })
+  const played = listen(on)
+  const toasts: string[] = []
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  on('session.measure', async (_$, e) => ({ changed: e.changed }))
+  // even more than 60s later, same resetsAt window at 100% stays silent
+  await clock.advance(120_000)
+  await $.session.measure({
+    context: { tokens: 1000, window: 200_000 },
+    changed: ['rateLimits'],
+    rateLimits: [{ kind: 'five_hour', percentUsed: 100, resetsAt: '2026-10-17T14:00:00Z' }],
+  })
+  expect(played).toEqual([])
+  expect(toasts).toEqual([])
+
+  // when a new 5h window starts (different resetsAt) and hits 100%, it rings once
+  await $.session.measure({
+    context: { tokens: 1000, window: 200_000 },
+    changed: ['rateLimits'],
+    rateLimits: [{ kind: 'five_hour', percentUsed: 100, resetsAt: '2026-10-17T19:00:00Z' }],
+  })
+  expect(played).toEqual(['sounds/quota.wav'])
+  expect(toasts).toHaveLength(1)
+})
+
+test('a ClaudeProbe session stays silent on quota', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const played = listen(on)
+  on('classic.SessionStart', async () => ({}))
+  on('session.measure', async (_$, e) => ({ changed: e.changed }))
+  await $.classic.SessionStart({ source: 'startup', cwd: '/Users/batapha/Library/Application Support/CodexBar/ClaudeProbe' } as never)
+  await $.session.measure({
+    context: { tokens: 1000, window: 200_000 },
+    changed: ['rateLimits'],
+    rateLimits: [{ kind: 'five_hour', percentUsed: 100, resetsAt: '2026-10-17T14:00:00Z' }],
+  })
+  expect(played).toEqual([])
+})
