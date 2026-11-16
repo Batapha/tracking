@@ -12,6 +12,7 @@ export const EMPTY_USAGE: Usage = {
   isTtlKnown: false,
   models: {},
   agents: {},
+  startedAt: null,
 }
 
 
@@ -34,7 +35,7 @@ export const DEFAULTS: Options = {
   speakStages: false,
   renameSession: true,
   titleTemplate: '{project} · {task}',
-  planGate: true,
+  planGate: false,
 }
 
 export function readOptions(raw: unknown): Options {

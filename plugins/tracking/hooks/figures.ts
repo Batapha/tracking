@@ -204,19 +204,21 @@ export function ringSvg(frac: number, level: Level): string {
 }
 
 // every cell leads with one icon in a fixed slot: a ring that fills, or a plain grey outline
-export type Icon = 'ring' | 'clock' | 'coin' | 'cube' | 'info' | 'steps'
+export type Icon = 'ring' | 'clock' | 'coin' | 'cube' | 'info' | 'steps' | 'hourglass' | 'flag'
 const OUTLINE: Record<Exclude<Icon, 'ring'>, string> = {
   clock: '<circle cx="8" cy="8.6" r="5.6"/><path d="M8 5.8v3l2 1.3M6.3 2.2h3.4"/>',
   coin: '<circle cx="8" cy="8" r="6.2"/><path d="M10 6c-.4-.7-1.1-.9-2-.9-1.1 0-1.9.6-1.9 1.4 0 2 4 1 4 3 0 .9-.9 1.5-2.1 1.5-.9 0-1.7-.3-2.1-1M8 4v1.1M8 10.9V12"/>',
   cube: '<path d="M8 1.8 13.6 5v6L8 14.2 2.4 11V5z"/>',
   info: '<circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v4M8 4.8v.1"/>',
   steps: '<path d="M2.4 12.6h3.4V9.2h3.4V5.8h4.4"/>',
+  hourglass: '<path d="M4.5 2.5h7M4.5 13.5h7M5 2.5c0 3 3 3.5 3 5.5s-3 2.5-3 5.5M11 2.5c0 3-3 3.5-3 5.5s3 2.5 3 5.5"/>',
+  flag: '<path d="M4 14V2.5M4 3h7.5L9.7 5.5 11.5 8H4"/>',
 }
 export function iconSvg(icon: Exclude<Icon, 'ring'>): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A8984" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${OUTLINE[icon]}</svg>`
 }
 // the terminal draws no Svg: one narrow glyph per icon
-export const ICON_GLYPH: Record<Exclude<Icon, 'ring'>, string> = { clock: '◷', coin: '$', cube: '◆', info: '≡', steps: '▸' }
+export const ICON_GLYPH: Record<Exclude<Icon, 'ring'>, string> = { clock: '◷', coin: '$', cube: '◆', info: '≡', steps: '▸', hourglass: '⧗', flag: '⚑' }
 export function dotSvg(level: Level): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="${HEX[level]}"/></svg>`
 }
@@ -288,6 +290,47 @@ export function usageCells(u: Usage, opts: Options, now: number): { usage: Cell[
     spend.push({ key: 'm-none', icon: 'cube', frac: 0, level: 'off', value: '—', label: '模型' })
   }
   return { usage, spend }
+}
+
+// ---------- the compact band: one row around Budget fence ----------
+
+// the clock time a session began, in Shanghai time (the person's), "22:14"
+export function fmtStart(ms: number): string {
+  try {
+    return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(ms)
+  } catch {
+    const d = new Date(ms + 8 * 3_600_000)
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+  }
+}
+
+// left of Budget fence: the weekly window and the context; right of it: the cache, when the session began, its cost
+export function compactCells(u: Usage, opts: Options, now: number): { left: Cell[]; right: Cell[] } {
+  const left: Cell[] = []
+  const w = opts.showRateLimits ? u.rateLimits.find(r => r.kind === 'seven_day') : undefined
+  if (!w) left.push({ key: 'rl-seven_day', icon: 'ring', frac: 0, level: 'off', value: '—', label: windowLabel('seven_day') })
+  else {
+    const reset = w.resetsAt ? ` · ${fmtSpan(Date.parse(w.resetsAt) - now)} 后重置` : ''
+    left.push({ key: 'rl-seven_day', icon: 'ring', frac: w.percentUsed / 100, level: quotaLevel(w.percentUsed), value: `${Math.round(w.percentUsed)}%`, label: `${windowLabel('seven_day')}${reset}` })
+  }
+  const pct = ctxPercent(u)
+  const toCompact = untilCompact(u)
+  left.push({ key: 'ctx', icon: 'ring', frac: (pct ?? 0) / 100, level: ctxLevel(u), value: pct === null ? '—' : `${pct}%`, label: toCompact === null ? '上下文' : `上下文 · 距压缩 ${toCompact}%` })
+
+  const right: Cell[] = []
+  const cache = cacheLeftMs(u, now)
+  const ttlLabel = `${u.isTtlKnown ? '' : '≈'}${u.cacheTtlMs >= 3_600_000 ? '1h' : '5m'}`
+  if (cache === null) right.push({ key: 'cache', icon: 'hourglass', frac: 0, level: 'off', value: '—', label: `缓存 · ${ttlLabel}` })
+  else if (cache > 0) right.push({ key: 'cache', icon: 'hourglass', frac: cache / u.cacheTtlMs, level: cache <= 60_000 ? 'warn' : 'ok', value: fmtClock(cache), label: `缓存 · ${ttlLabel}` })
+  else {
+    const cost = u.model && u.ctxTokens ? recacheCost(u.model, u.ctxTokens, u.cacheTtlMs) : null
+    right.push({ key: 'cache', icon: 'hourglass', frac: 0, level: 'bad', value: '已失效', label: cost === null ? '缓存' : `缓存 · 下条约多 ${fmtUsd(cost)}` })
+  }
+  const started = u.startedAt ?? null
+  right.push({ key: 'start', icon: 'flag', frac: 0, level: started === null ? 'off' : 'ok', value: started === null ? '—' : fmtStart(started), label: started === null ? '开始' : `开始 · 已 ${fmtSpan(now - started)}` })
+  const { total } = sessionTotal(u)
+  right.push({ key: 'cost', icon: 'coin', frac: 1, level: 'ok', value: total === null ? '$—' : fmtUsd(total), label: '本会话' })
+  return { left, right }
 }
 
 // the grid's first two rows, three cells each before the fourth column: usage (ctx, 5h, weekly) and spend (cache, session cost, models)

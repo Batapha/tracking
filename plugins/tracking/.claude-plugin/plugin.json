@@ -1,7 +1,7 @@
 {
   "name": "tracking",
-  "version": "0.9.4",
-  "description": "提示框上方三行：用量（上下文、5 小时、7 天限额）/ 缓存倒计时、本会话金额、各模型 token / 当前任务的步骤进度条；提示音、会话自动命名；可在对话里用文字显示/隐藏、改设置",
+  "version": "0.10.0",
+  "description": "提示框上方一行：左边周额度、上下文，中间 Budget fence，右边缓存倒计时、会话开始时间、本会话金额；提示音、会话自动命名；可在对话里用文字显示/隐藏、改设置",
   "author": {
     "name": "Batapha"
   },
@@ -54,7 +54,7 @@
       "type": "boolean",
       "title": "多步任务先建进度条",
       "description": "没有进度条时，第 4 次改动类工具调用会被拦一次，让 Claude 先建进度条",
-      "default": true
+      "default": false
     }
   }
 }

@@ -32,6 +32,8 @@ export type Usage = {
   models: Record<string, ModelTokens>
   // per subagent: model and tokens, for the details pane
   agents: Record<string, { title: string; model: string; tokens: number }>
+  // when the session began ($.session.usage().startedAt), for the 开始 cell
+  startedAt?: number | null
 }
 
 // ---------- progress bars (adapted from plan-progress, MIT) ----------

@@ -7,7 +7,7 @@ import type { EngineInterface, On, Register } from 'claude-code'
 import type { AgentRun, Plan, PlanState, RateWindow, Usage } from '../types'
 import { TOOL, FOLD_MS, STATE_COLOR, STATE_GLYPH, RULES, str, status, list, isFinished, normalize, parsePlan, st, DEMO, where, AGENTS, isOpenPlan, slug, placeBar, syncAuto, addRun, STEP_SCHEMA, WORK_TOOLS, WORK_BEFORE_PLAN, CALLS_BEFORE_NUDGE, SEG_H, segments, segmentsSvg, segmentsLabel, segmentsCount, shownBar } from './bars'
 import type { Raw, Where } from './bars'
-import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, glyphOf, usageCells, renderTitle, cells, columnContent, bandLayout, agentRuns, agentsCell, pulseDotSvg } from './figures'
+import { DETAIL_PANE, cacheLeftMs, windowLabel, add, detailMarkdown, ringSvg, iconSvg, dotSvg, ICON_GLYPH, glyphOf, usageCells, compactCells, renderTitle, cells, columnContent, bandLayout, agentRuns, agentsCell, pulseDotSvg } from './figures'
 import type { Cell, ColumnLayout, Icon } from './figures'
 import { CONTROL, CONTROL_SPEC, readControl, settingRowKey, statusText, settingLine } from './control'
 import type { SettingKey } from './control'
@@ -162,6 +162,7 @@ async function usageSessionStart($: EngineInterface) {
     costUsd: now?.cost?.usd ?? u.costUsd,
     cacheTtlMs: fixedTtl ?? u.cacheTtlMs,
     isTtlKnown: fixedTtl !== null || u.isTtlKnown,
+    startedAt: now?.startedAt ?? u.startedAt ?? null,
   }))
   void refreshCompactAt($)
   await $.command.register({ name: 'tracking', description: '显示或隐藏 Tracking 用量条' })
@@ -680,11 +681,7 @@ function registerProgress(on: On, options: Options) {
     return next(e)
   })
 
-  on('prompt.compose', async ($, e, next) => {
-    const result = await next(e)
-
-    return { sections: [...result.sections, { id: 'tracking:rules', text: RULES, scope: 'session' as const }] }
-  })
+  // 0.10: the band no longer draws the progress bars, so the model is no longer told to keep them (RULES stays in bars.ts)
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const raw = e as unknown as Raw
@@ -965,6 +962,65 @@ async function bandColumns($: EngineInterface, surface: string, bodyColumns: num
   return bandLayout(content, bodyColumns || 80)
 }
 
+// ---------- the compact row ----------
+
+const isTracking = (plugin: string) => plugin === 'tracking' || plugin.startsWith('tracking@')
+const isFence = (plugin: string) => plugin === 'budget-fence' || plugin.startsWith('budget-fence@')
+
+function gapOf(surface: string, size: 'tight' | 'group') {
+  if (surface === 'terminal') return size === 'tight' ? 1 : 2
+  return size === 'tight' ? ('xs' as const) : ('sm' as const)
+}
+
+// labels go first when the row would not fit: the weekly cell keeps its reset time, the rest show icon and figure
+const ROW_ICON = 3
+async function compactSides($: EngineInterface, t: Elements, surface: string, bodyColumns: number, aroundFence: boolean) {
+  await read($, tick)
+  const u = await read($, usage)
+  const { left, right } = compactCells(u, opts, await $.clock.now())
+  const all = [...left, ...right]
+  const wide = all.reduce((n, c) => n + ROW_ICON + cells(c.value) + 1 + cells(c.label) + 3, 0) + (aroundFence ? 34 : 0)
+  const isNarrow = wide > (bodyColumns || 80)
+  const shortLabel = (c: Cell) => {
+    if (!isNarrow) return c.label
+    if (c.key === 'rl-seven_day') return c.label.match(/· (\S+) 后重置/)?.[1] ?? ''
+    return ''
+  }
+  const draw = (c: Cell) => compactCell(t, surface, c, shortLabel(c))
+  return { left: left.map(draw), right: right.map(draw) }
+}
+
+function compactCell(t: Elements, surface: string, c: Cell, label: string) {
+  const { Box, Text } = t
+  const value = c.level === 'warn' || c.level === 'bad' ? <Text key="v" color={THEME[c.level]}>{c.value}</Text> : c.level === 'off' ? <Text key="v" dimColor>{c.value}</Text> : <Text key="v">{c.value}</Text>
+  return (
+    <Box key={c.key} flexDirection="row" alignItems="center" columnGap={gapOf(surface, 'tight')} flexShrink={0}>
+      {iconOf(t, surface, c.icon, c.frac, c.level, c.label)}
+      {value}
+      {label ? (
+        <Text key="l" dimColor wrap="truncate">
+          {label}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+// a hairline between groups: an Svg the size of the icons on a graphical surface, "│" on the terminal
+const DIVIDER = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="7.5" y="2" width="1" height="12" fill="#808080" fill-opacity=".45"/></svg>'
+function joinGroups(t: Elements, surface: string, groups: JSX.Element[], key: string) {
+  const { Text } = t
+  const divider = (i: number) =>
+    surface !== 'terminal' && 'Svg' in t ? (
+      <t.Svg key={`${key}-div-${i}`} source={DIVIDER} alt="分隔线" width={16} height={16} />
+    ) : (
+      <Text key={`${key}-div-${i}`} dimColor>
+        │
+      </Text>
+    )
+  return groups.flatMap((g, i) => (i === 0 ? [g] : [divider(i), g]))
+}
+
 // ---------- session title and the band ----------
 
 async function sessionTitleFor($: EngineInterface, opts: Options, cwd: string): Promise<string | undefined> {
@@ -978,30 +1034,41 @@ export const register: Register = (on, options) => {
   registerUsage(on, opts)
   registerProgress(on, opts)
 
-  // one band: the usage rows, then the progress bars
+  // one row: the weekly window and the context, Budget fence's row, then the cache, the start and the cost
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey || (await read($, isHidden))) return next(e)
     const t = $.ui.resolve(e)
-    const layout = await bandColumns($, e.surface, e.props.bodyColumns)
-    const top = await drawUsage($, e, opts, t, layout)
-    const hidden = await read($, isHidden)
-    const bars = hidden ? null : await drawProgress($, e.surface, e.props.bodyColumns, t, layout)
+    const sides = await compactSides($, t, e.surface, e.props.bodyColumns, false)
     const { Box } = t
-    // hidden on the desktop: one slim row, the switch at its right end, so the band can come back
-    if (hidden && e.surface === 'desktop') {
-      return (
-        <Box key="tracking-hidden" flexDirection="row" width="100%" justifyContent="flex-end">
-          {toggleButton($, t, true)}
-        </Box>
-      )
-    }
-    if (!top && !bars) return next(e)
-
     return (
-      <Box flexDirection="column" width="100%">
-        {top}
-        {top && bars ? hairline(t, e.surface, e.props.bodyColumns, 'line-progress') : null}
-        {bars}
+      <Box key="tracking-row" flexDirection="row" width="100%" alignItems="center" justifyContent="center" columnGap={gapOf(e.surface, 'group')}>
+        {joinGroups(t, e.surface, [...sides.left, ...sides.right], 'all')}
+      </Box>
+    )
+  })
+
+  // with Budget fence's row the only other one, tracking's cells go either side of it on one line
+  on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
+    const rows = e.props.rows
+    const mine = rows.find(r => isTracking(r.plugin))
+    const fence = rows.find(r => isFence(r.plugin))
+    if (e.props.hasSurvey || !mine || !fence || rows.length !== 2) return next(e)
+    const middle = await next({ ...e, props: { ...e.props, rows: [fence] } })
+    const t = $.ui.resolve(e)
+    const { Box } = t
+    const sides = await compactSides($, t, e.surface, e.props.bodyColumns, true)
+    const gap = gapOf(e.surface, 'group')
+    return (
+      <Box key="tracking-around-fence" flexDirection="row" width="100%" alignItems="center" columnGap={gap}>
+        <Box key="left" flexDirection="row" alignItems="center" flexShrink={0} columnGap={gap}>
+          {joinGroups(t, e.surface, sides.left, 'left')}
+        </Box>
+        <Box key="fence" flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center" alignItems="center">
+          {middle}
+        </Box>
+        <Box key="right" flexDirection="row" alignItems="center" flexShrink={0} columnGap={gap}>
+          {joinGroups(t, e.surface, sides.right, 'right')}
+        </Box>
       </Box>
     )
   })
