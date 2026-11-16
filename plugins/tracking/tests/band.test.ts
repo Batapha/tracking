@@ -91,28 +91,21 @@ for (const surface of SURFACES) {
     expect(small).not.toContain('距压缩')
   })
 
-  test(`beside Budget fence on ${surface}: weekly and context left of its row, cache, start and cost right`, async ($, on) => {
+  test(`above Budget fence on ${surface}: tracking's row comes first, every row kept`, async ($, on) => {
     mock.clock(on, { now: NOW })
     mock.store(on)
     answerEngine(on)
     await $.session.start({ cwd: '/Users/batapha/shop', surface, isInteractive: true })
-    const fence = { plugin: 'budget-fence@claude-code-mods', tree: {} as RenderElement }
-    const mine = { plugin: 'tracking@batapha-mods', tree: {} as RenderElement }
-    const base = { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 160 }
-    const ui = await $.ui.mount({ plugin: 'tracking', surface, component: 'AbovePromptList', props: { ...base, rows: [mine, fence] } as never })
-    const around = await ui.find({ key: 'tracking-around-fence' })
-    expect(around).toBeDefined()
-    const parts = (around?.children ?? []) as { key?: string; props: Record<string, unknown>; text?: string }[]
-    expect(parts.map(p => p.key ?? p.props.key)).toEqual(['left', 'fence', 'right'])
-    expect(await ui.find({ key: 'row-budget-fence@claude-code-mods' })).toBeDefined()
-    expect(await ui.find({ key: 'row-tracking@batapha-mods' })).toBeUndefined()
-    expect((await ui.find({ key: 'left' }))?.text).toContain('上下文')
-    expect((await ui.find({ key: 'right' }))?.text).toContain('本会话')
-
-    // with a third mod's row the band is left as the engine stacks it
+    const fence = { plugin: 'budget-fence', tree: {} as RenderElement }
+    const mine = { plugin: 'tracking', tree: {} as RenderElement }
     const other = { plugin: 'easel', tree: {} as RenderElement }
-    const stacked = await $.ui.mount({ plugin: 'tracking', surface, component: 'AbovePromptList', props: { ...base, rows: [mine, fence, other] } as never })
-    expect(await stacked.find({ key: 'tracking-around-fence' })).toBeUndefined()
+    const base = { hasSurvey: false, isCollapsed: false, isWorking: true, maxRows: 20, bodyColumns: 160 }
+    const ui = await $.ui.mount({ plugin: 'tracking', surface, component: 'AbovePromptList', props: { ...base, rows: [fence, other, mine] } as never })
+    const stack = await ui.find({ key: 'engine-stack' })
+    const keys = ((stack?.children ?? []) as { key?: string; props: Record<string, unknown> }[]).map(c => c.key ?? c.props.key)
+    expect(keys).toEqual(['row-tracking', 'row-budget-fence', 'row-easel'])
+    // no wrapper: the desktop would drop a wrapper's own content
+    expect(await ui.find({ key: 'tracking-around-fence' })).toBeUndefined()
   })
 }
 

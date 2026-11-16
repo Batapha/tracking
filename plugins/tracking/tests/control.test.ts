@@ -22,7 +22,7 @@ test('no fields reads the state without changing it', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   const state = await $.tool.call({ tool: CONTROL } as never)
-  expect(state).toMatchObject({ result: expect.stringContaining('多步任务先建进度条：开') })
+  expect(state).toMatchObject({ result: expect.stringContaining('多步任务先建进度条：关') })
 })
 
 test('settings go through the settings writer under the plugin row key', async ($, on) => {

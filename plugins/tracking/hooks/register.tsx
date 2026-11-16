@@ -965,7 +965,6 @@ async function bandColumns($: EngineInterface, surface: string, bodyColumns: num
 // ---------- the compact row ----------
 
 const isTracking = (plugin: string) => plugin === 'tracking' || plugin.startsWith('tracking@')
-const isFence = (plugin: string) => plugin === 'budget-fence' || plugin.startsWith('budget-fence@')
 
 function gapOf(surface: string, size: 'tight' | 'group') {
   if (surface === 'terminal') return size === 'tight' ? 1 : 2
@@ -974,12 +973,12 @@ function gapOf(surface: string, size: 'tight' | 'group') {
 
 // labels go first when the row would not fit: the weekly cell keeps its reset time, the rest show icon and figure
 const ROW_ICON = 3
-async function compactSides($: EngineInterface, t: Elements, surface: string, bodyColumns: number, aroundFence: boolean) {
+async function compactSides($: EngineInterface, t: Elements, surface: string, bodyColumns: number) {
   await read($, tick)
   const u = await read($, usage)
   const { left, right } = compactCells(u, opts, await $.clock.now())
   const all = [...left, ...right]
-  const wide = all.reduce((n, c) => n + ROW_ICON + cells(c.value) + 1 + cells(c.label) + 3, 0) + (aroundFence ? 34 : 0)
+  const wide = all.reduce((n, c) => n + ROW_ICON + cells(c.value) + 1 + cells(c.label) + 3, 0)
   const isNarrow = wide > (bodyColumns || 80)
   const shortLabel = (c: Cell) => {
     if (!isNarrow) return c.label
@@ -1038,7 +1037,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, isHidden))) return next(e)
     const t = $.ui.resolve(e)
-    const sides = await compactSides($, t, e.surface, e.props.bodyColumns, false)
+    const sides = await compactSides($, t, e.surface, e.props.bodyColumns)
     const { Box } = t
     return (
       <Box key="tracking-row" flexDirection="row" width="100%" alignItems="center" justifyContent="center" columnGap={gapOf(e.surface, 'group')}>
@@ -1047,30 +1046,13 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // with Budget fence's row the only other one, tracking's cells go either side of it on one line
+  // tracking's row first, above Budget fence's and any other mod's. The desktop draws only the rows a list
+  // hands on, never a wrapper's own content, so the rows are ordered, not wrapped (0.10.0 wrapped them and lost ours)
   on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
     const rows = e.props.rows
     const mine = rows.find(r => isTracking(r.plugin))
-    const fence = rows.find(r => isFence(r.plugin))
-    if (e.props.hasSurvey || !mine || !fence || rows.length !== 2) return next(e)
-    const middle = await next({ ...e, props: { ...e.props, rows: [fence] } })
-    const t = $.ui.resolve(e)
-    const { Box } = t
-    const sides = await compactSides($, t, e.surface, e.props.bodyColumns, true)
-    const gap = gapOf(e.surface, 'group')
-    return (
-      <Box key="tracking-around-fence" flexDirection="row" width="100%" alignItems="center" columnGap={gap}>
-        <Box key="left" flexDirection="row" alignItems="center" flexShrink={0} columnGap={gap}>
-          {joinGroups(t, e.surface, sides.left, 'left')}
-        </Box>
-        <Box key="fence" flexGrow={1} minWidth={0} flexDirection="row" justifyContent="center" alignItems="center">
-          {middle}
-        </Box>
-        <Box key="right" flexDirection="row" alignItems="center" flexShrink={0} columnGap={gap}>
-          {joinGroups(t, e.surface, sides.right, 'right')}
-        </Box>
-      </Box>
-    )
+    if (!mine || rows[0] === mine) return next(e)
+    return next({ ...e, props: { ...e.props, rows: [mine, ...rows.filter(r => r !== mine)] } })
   })
 
   on('classic.SessionStart', async ($, e, next) => {
