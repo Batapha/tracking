@@ -127,11 +127,14 @@ test('the ledger keeps tokens per model and per subagent', async ($, on) => {
   expect(md).toContain('查日志')
 })
 
-test('the session title follows the template', { options: { titleTemplate: '{project} · {task}' } }, async ($, on) => {
-  on('classic.SessionStart', async () => ({}))
-  const result = await $.classic.SessionStart({ source: 'startup', cwd: '/Users/batapha/shop' } as never)
-  expect(result).toMatchObject({ sessionTitle: 'shop' })
-})
+// 0.10.2：会话命名靠 classic.SessionStart / UserPromptSubmit 输出 sessionTitle，而 classic 事件已被
+// cc-plugin-sec-default 截走、两个 hook 在 register.tsx 里注释掉，此用例停用。
+// 恢复条件：sec-default 放行 classic.*（managed settings 的 prependPlugins），再把 hook 注释放开。
+// test('the session title follows the template', { options: { titleTemplate: '{project} · {task}' } }, async ($, on) => {
+//   on('classic.SessionStart', async () => ({}))
+//   const result = await $.classic.SessionStart({ source: 'startup', cwd: '/Users/batapha/shop' } as never)
+//   expect(result).toMatchObject({ sessionTitle: 'shop' })
+// })
 
 test('/tracking hides the row and shows it again; the terminal footer keeps its switch', async ($, on) => {
   mock.clock(on, { now: NOW })

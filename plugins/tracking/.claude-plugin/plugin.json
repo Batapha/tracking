@@ -1,6 +1,6 @@
 {
   "name": "tracking",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "提示框上方一行：周额度、上下文、缓存倒计时、会话开始时间、本会话金额，排在 Budget fence 那一行上面；提示音、会话自动命名；可在对话里用文字显示/隐藏、改设置",
   "author": {
     "name": "Batapha"

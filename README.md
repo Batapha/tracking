@@ -64,3 +64,22 @@ claude plugin update tracking@batapha-mods
 - “Tracking 现在什么设置？”
 
 设置的改动和在 `/plugin` → tracking → 配置 里改是一样的，会保存下来，插件随即重新加载。
+
+## 版本记录
+
+### 0.10.2（2026-11-17）
+
+停用全部 `classic.*` hook。Claude Code 内置的安全插件 `cc-plugin-sec-default@builtin` 在启用组织策略的机器上排在最外层，它的 scan 列表含 `classic.*`，这些事件先被它收走，插件注册的 classic hook 一律跳过，引擎于是每个会话往对话里贴「its classic.SessionStart hook was skipped…」这类通报。这些 hook 早已不执行，注释掉只去掉提示，不减功能。
+
+随之停用的功能与测试：
+
+| 原来 | 现在 | 备注 |
+| --- | --- | --- |
+| 按模板自动命名会话（`classic.SessionStart` / `UserPromptSubmit` 返回 `sessionTitle`） | 停用 | `sessionTitle` 只在 classic 的这两个输出里有效，迁不进新式事件 |
+| 收尾时「进度条还没更新」拦一次提醒（`classic.Stop`） | 停用 | |
+| 权限框弹出时响 decision（`classic.Notification`） | 停用 | 提问、提交计划两处响铃走 `AskUserQuestion` / `ExitPlanMode`，仍在 |
+| 额度用完响铃（`classic.StopFailure`） | 停用 | `session.measure` 里到 100% 的响铃仍在 |
+| 缓存 TTL 自动识别（依赖 classic hook 传入的 `transcriptPath`） | 一直未生效 | 缓存格按 5m 默认值倒计时 |
+
+原代码以注释形式留在 `hooks/register.tsx` 里，附恢复条件与说明；相关测试同步注释或改写。恢复的前提只有一个：managed settings 的 `prependPlugins` / `appendPlugins` 允许 `sec-default` 让位，属组织策略。
+

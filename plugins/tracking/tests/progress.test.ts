@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 const TOOL = 'mcp__tracking__plan_progress'
 
-test('finishing a stage plays no sound and the session is renamed', async ($, on) => {
+test('finishing a stage plays no sound', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   const played: string[] = []
@@ -11,7 +11,6 @@ test('finishing a stage plays no sound and the session is renamed', async ($, on
     played.push(e.clip.asset ?? '')
     return { value: undefined } as never
   })
-  on('classic.UserPromptSubmit', async () => ({}))
 
   const create = await $.tool.call({
     tool: TOOL,
@@ -28,8 +27,11 @@ test('finishing a stage plays no sound and the session is renamed', async ($, on
   await $.tool.call({ tool: TOOL, id: 'orders', next: true } as never)
   expect(played).toEqual([])
 
-  const titled = await $.classic.UserPromptSubmit({ prompt: '继续', cwd: '/Users/batapha/shop' } as never)
-  expect(titled).toMatchObject({ sessionTitle: 'shop · 订单模块' })
+  // 0.10.2：会话自动命名靠 classic.UserPromptSubmit，该 hook 已被 sec-default 跳过并注释掉，
+  // 标题这条断言随之停用（sessionTitle 只在 classic 输出里有效，迁不进新式事件）。
+  // on('classic.UserPromptSubmit', async () => ({}))
+  // const titled = await $.classic.UserPromptSubmit({ prompt: '继续', cwd: '/Users/batapha/shop' } as never)
+  // expect(titled).toMatchObject({ sessionTitle: 'shop · 订单模块' })
 })
 
 for (const sounds of [true, false]) {

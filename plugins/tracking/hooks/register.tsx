@@ -602,47 +602,62 @@ function registerProgress(on: On, options: Options) {
     }
   })
 
-  // an open bar at the end of a turn: a question to the user marks it waiting on its own;
-  // only a turn that did work and left the bar unexplained is sent back once.
-  // A turn's end is silent, whether it ends on a question or not; only the bar and the dot show it.
-  on('classic.Stop', async ($, e, next) => {
-    const result = await next(e)
-    await usageStop($, e.transcript_path)
-    if (result.block || isWaitingOnBackground || (e.background_tasks?.length ?? 0) > 0) return result
-    // a turn that ends on a question waits on the person, bar or no bar
-    const asks = /[?？]\s*$/.test(e.last_assistant_message ?? '')
-    const open = (await read($, plans)).filter(isOpenPlan)
-    if (!e.stop_hook_active && !asks && open.length > 0 && (workCalls > 0 || isPlanTouched)) {
-      return {
-        ...result,
-        block: `tracking: ${open.map(p => p.id).join(', ')} still open. Update each with ${TOOL}: {id, next:true}, or state "done", "needs_input" or "error" with a note.`,
-      }
-    }
-    const last = open[open.length - 1]
-    if (asks && last) await putPlan($, { ...last, state: 'needs_input' }, false)
-    else if (asks) await update($, activity, () => 'waiting')
-
-    return result
-  })
-
-  // the engine shows a permission dialog: the one permission moment that rings, for the main loop and its agents alike
-  on('classic.Notification', async ($, e, next) => {
-    const result = await next(e)
-    if (e.notification_type === 'permission_prompt') {
-      await update($, activity, () => 'waiting')
-      await ringDecision($)
-    }
-
-    return result
-  })
-
-  // a turn the API refused for the usage limit: the quota has run out
-  on('classic.StopFailure', async ($, e, next) => {
-    const result = await next(e)
-    if (e.error === 'rate_limit' && opts.quotaAlerts) await ringQuota($, '额度已用完，本轮已停止')
-
-    return result
-  })
+  // ===== 0.10.2（2026-11-17）：classic 类 hook 全部注释停用 =====
+  // 为什么停：Claude Code 内置的安全插件 cc-plugin-sec-default@builtin 排在所有用户插件之前，
+  // 它的 scan 列表里写着 "classic.*"，连 classic 事件先由它收走，tracking 注册的这些 hook 一律被跳过（skip），
+  // 引擎于是每个会话都往对话里逐条贴通报：
+  //   tracking: its classic.SessionStart hook was skipped. "cc-plugin-sec-default" runs first and sent the event on past it.
+  //   （UserPromptSubmit、Stop 同样，Notification / StopFailure 触发时也一样）
+  // 也就是说这些 hook 早就没在跑，只剩刷屏；注释掉只去掉提示，不减任何实际功能。
+  // 怎么恢复（二选一）：① 让 sec-default 放行——只有 managed settings 的 prependPlugins / appendPlugins 能排它的位置，
+  // 属组织策略，个人改不了；② 把逻辑迁到新式事件（turn.complete / session.start / prompt.submit），
+  // 但有两件迁不过去：会话自动命名（sessionTitle 只在 classic 的 SessionStart / UserPromptSubmit 输出里有效，
+  // 引擎的 hook 输出 schema 仅这两处带 sessionTitle 字段）、未更新进度条时在收尾拦一次提醒。
+  // 连带影响：transcriptPath 只在文件末尾那两个 classic hook 里赋值，所以缓存 TTL 自动识别（detectTtlEarly）一直没跑，
+  // 「≈5m」这类默认值就是这么来的；恢复 classic hook 时才一起复活。
+  // 下面原代码整段保留（注释形式），确认要迁新式事件时照抄即可。
+  //
+  // // an open bar at the end of a turn: a question to the user marks it waiting on its own;
+  // // only a turn that did work and left the bar unexplained is sent back once.
+  // // A turn's end is silent, whether it ends on a question or not; only the bar and the dot show it.
+  // on('classic.Stop', async ($, e, next) => {
+  //   const result = await next(e)
+  //   await usageStop($, e.transcript_path)
+  //   if (result.block || isWaitingOnBackground || (e.background_tasks?.length ?? 0) > 0) return result
+  //   // a turn that ends on a question waits on the person, bar or no bar
+  //   const asks = /[?？]\s*$/.test(e.last_assistant_message ?? '')
+  //   const open = (await read($, plans)).filter(isOpenPlan)
+  //   if (!e.stop_hook_active && !asks && open.length > 0 && (workCalls > 0 || isPlanTouched)) {
+  //     return {
+  //       ...result,
+  //       block: `tracking: ${open.map(p => p.id).join(', ')} still open. Update each with ${TOOL}: {id, next:true}, or state "done", "needs_input" or "error" with a note.`,
+  //     }
+  //   }
+  //   const last = open[open.length - 1]
+  //   if (asks && last) await putPlan($, { ...last, state: 'needs_input' }, false)
+  //   else if (asks) await update($, activity, () => 'waiting')
+  //
+  //   return result
+  // })
+  //
+  // // the engine shows a permission dialog: the one permission moment that rings, for the main loop and its agents alike
+  // on('classic.Notification', async ($, e, next) => {
+  //   const result = await next(e)
+  //   if (e.notification_type === 'permission_prompt') {
+  //     await update($, activity, () => 'waiting')
+  //     await ringDecision($)
+  //   }
+  //
+  //   return result
+  // })
+  //
+  // // a turn the API refused for the usage limit: the quota has run out
+  // on('classic.StopFailure', async ($, e, next) => {
+  //   const result = await next(e)
+  //   if (e.error === 'rate_limit' && opts.quotaAlerts) await ringQuota($, '额度已用完，本轮已停止')
+  //
+  //   return result
+  // })
 
   on('session.start', async ($, e, next) => {
     if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
@@ -1055,19 +1070,25 @@ export const register: Register = (on, options) => {
     return next({ ...e, props: { ...e.props, rows: [mine, ...rows.filter(r => r !== mine)] } })
   })
 
-  on('classic.SessionStart', async ($, e, next) => {
-    if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
-    transcriptPath = e.transcript_path ?? transcriptPath
-    const result = await next(e)
-    const sessionTitle = await sessionTitleFor($, opts, e.cwd)
-    return sessionTitle && !result.sessionTitle ? { ...result, sessionTitle } : result
-  })
-
-  on('classic.UserPromptSubmit', async ($, e, next) => {
-    if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
-    transcriptPath = e.transcript_path ?? transcriptPath
-    const result = await next(e)
-    const sessionTitle = await sessionTitleFor($, opts, e.cwd)
-    return sessionTitle && !result.sessionTitle ? { ...result, sessionTitle } : result
-  })
+  // ===== 0.10.2（2026-11-17）：会话命名用的两个 classic hook 注释停用，理由见文件中部 0.10.2 那段长注 =====
+  // 这两处同时是 transcriptPath 的唯一来源：注释后 transcriptPath 恒为 undefined，
+  // detectTtlEarly / usageStop 的 TTL 识别继续不跑（本来也没跑），缓存格按 5m 默认值倒计时。
+  // 若将来要恢复自动命名，先确认 sec-default 已放行 classic.*（需要 managed settings 的 prependPlugins），
+  // 否则注释回来只会继续刷「hook was skipped」通报。
+  //
+  // on('classic.SessionStart', async ($, e, next) => {
+  //   if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
+  //   transcriptPath = e.transcript_path ?? transcriptPath
+  //   const result = await next(e)
+  //   const sessionTitle = await sessionTitleFor($, opts, e.cwd)
+  //   return sessionTitle && !result.sessionTitle ? { ...result, sessionTitle } : result
+  // })
+  //
+  // on('classic.UserPromptSubmit', async ($, e, next) => {
+  //   if (e.cwd && e.cwd.includes('ClaudeProbe')) isProbeSession = true
+  //   transcriptPath = e.transcript_path ?? transcriptPath
+  //   const result = await next(e)
+  //   const sessionTitle = await sessionTitleFor($, opts, e.cwd)
+  //   return sessionTitle && !result.sessionTitle ? { ...result, sessionTitle } : result
+  // })
 }
